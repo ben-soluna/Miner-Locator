@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Miner Locator</title>
+    <style>
+        /* --- CSS Variables & Resets --- */
+        :root {
+            --bg-color: #f0f2f5; 
+            --container-bg: #ffffff;
+            --text-color: #000000; 
+            --border-color: #c0c9d8; 
+            --table-border: #e2e8f0;
+            --th-bg: #f1f5f9; 
+            --th-hover: #e2e8f0;
+            --input-bg: #ffffff;
+            --success-color: #ea580c; 
+            --error-color: #cc0000; 
+            --status-color: #333333; 
+            --primary-color: #1d4ed8; 
+            --primary-hover: #1e3a8a;
+            --primary-text: #ffffff;
+            --gradient-accent: #00bfff; 
+            --container-shadow: 0 20px 40px rgba(0, 0, 0, 0.12); 
+            --corner-radius: 16px; 
+            --modal-bg: rgba(0,0,0,0.5);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #0d0d0d;
+                --container-bg: #1a1d21;
+                --text-color: #ffffff; 
+                --border-color: #4a5568; 
+                --table-border: #2d3748;
+                --th-bg: #2d3748; 
+                --th-hover: #4a5568;
+                --input-bg: #111111;
+                --success-color: #fb923c; 
+                --error-color: #f87171; 
+                --status-color: #e2e8f0; 
+                --primary-color: #3b82f6;
+                --primary-hover: #2563eb;
+                --gradient-accent: #34d399; 
+                --container-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        * { box-sizing: border-box; } 
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 0; background: var(--bg-color); color: var(--text-color); margin: 0; line-height: 1.5; }
+
+        /* App shell and sidebar rail layout */
+        .app-shell { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0; width: 100%; min-height: 100vh; }
+        .app-shell.sidebar-collapsed { grid-template-columns: 40px minmax(0, 1fr); }
+        .sidebar {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: visible;
+        }
+        .sidebar-header {
+            display: none;
+        }
+        .sidebar-title {
+            display: none;
+        }
+        .sidebar-toggle {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translate(55%, -50%);
+            width: 20px;
+            height: 44px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--container-bg);
+            color: var(--status-color);
+            font-size: 12px;
+            line-height: 1;
+            padding: 0;
+            cursor: pointer;
+            z-index: 20;
+        }
+        .sidebar-toggle:hover { background: var(--th-bg); color: var(--text-color); }
+
+        /* Sidebar menu tiles */
+        .sidebar nav { display: flex; flex-direction: column; }
+        .menu-item {
+            width: 100%;
+            text-align: center;
+            border: 0;
+            border-left: 3px solid transparent;
+            border-radius: 0;
+            background: var(--container-bg);
+            color: var(--status-color);
+            padding: 9px 4px 8px;
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.2;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            min-height: 64px;
+            border-bottom: 1px solid var(--table-border);
+        }
+        .menu-item:hover { background: var(--th-bg); color: var(--text-color); }
+        .menu-item.active {
+            background: var(--th-bg);
+            border-left-color: #f2b705;
+            color: var(--text-color);
+        }
+        .menu-item .menu-icon {
+            color: var(--status-color);
+            line-height: 1;
+        }
+        .menu-item .menu-icon svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .menu-item.active .menu-icon { color: var(--text-color); }
+        .menu-item .menu-label { display: block; }
+        /* Footer area inside sidebar */
+        .sidebar-bottom {
+            margin-top: auto;
+            border-top: 1px solid var(--table-border);
+        }
+        .sidebar-bottom .menu-item {
+            border-bottom: 1px solid var(--table-border);
+        }
+        .sidebar-version {
+            padding: 10px 6px 12px;
+            text-align: center;
+            font-size: 9px;
+            color: #b6bfcb;
+            line-height: 1.3;
+        }
+        /* Main panel and collapsed-state overrides */
+        .main-content { min-width: 0; padding: 10px; }
+        .app-shell.sidebar-collapsed .menu-label,
+        .app-shell.sidebar-collapsed .sidebar-version {
+            display: none;
+        }
+        .app-shell.sidebar-collapsed .menu-item {
+            min-height: 48px;
+            padding: 8px 1px;
+            gap: 0;
+        }
+        .app-shell.sidebar-collapsed .menu-item .menu-icon svg {
+            width: 18px;
+            height: 18px;
+        }
+        .app-shell.sidebar-collapsed .sidebar-toggle { transform: translate(55%, -50%); }
+        /* View switching containers */
+        .view-panel { display: none; }
+        .view-panel.active { display: block; }
+        .placeholder-card { background: var(--container-bg); padding: 24px; border-radius: 8px; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .placeholder-card h3 { margin-top: 0; margin-bottom: 10px; }
+
+        .container { max-width: none; margin: 0; background: var(--container-bg); padding: 30px; border-radius: 8px; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .app-title { margin-top: 0; margin-bottom: 25px; font-size: 38px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(90deg, var(--primary-color), var(--gradient-accent)); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: inline-block; }
+
+        /* --- Controls --- */
+        .controls { display: flex; gap: 15px; margin-bottom: 0; align-items: center; flex-wrap: wrap; background: var(--th-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); justify-content: space-between; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+        .control-group { display: flex; align-items: center; gap: 10px; }
+        label { font-weight: 700; font-size: 14px; color: var(--status-color); }
+        input, button { padding: 12px 16px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; transition: all 0.2s; }
+        input[type="text"] { width: 250px; background: var(--input-bg); color: var(--text-color); font-weight: 500; }
+        
+        button { background: var(--primary-color); color: var(--primary-text); cursor: pointer; border: none; font-weight: 700; }
+        button:hover:not(:disabled) { background: var(--primary-hover); }
+        button.secondary { background: transparent; border: 1px solid var(--primary-color); color: var(--primary-color); }
+        button.secondary:hover { background: var(--primary-color); color: var(--primary-text); }
+        button:disabled { background: var(--border-color); cursor: not-allowed; color: var(--status-color); opacity: 0.6; }
+        
+        .icon-btn { font-size: 18px; padding: 10px 14px; display: flex; align-items: center; justify-content: center; }
+        #status { font-weight: 700; font-size: 14px; color: var(--status-color); margin-left: 10px; }
+
+        /* --- Table Styling --- */
+        .table-wrapper { overflow-x: auto; }
+        .table-tools { display: flex; justify-content: flex-start; margin: 0; padding: 10px 0; }
+        .column-toolbox {
+            padding: 0;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: stretch;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--table-border);
+            background: var(--container-bg);
+            color: var(--status-color);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+        }
+        .column-tool-label {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 12px;
+            min-height: 32px;
+            border: none;
+            border-left: 1px solid var(--table-border);
+            background: transparent;
+            color: inherit;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            text-align: center;
+        }
+        .column-tool-icon {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 8px 0 0 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .column-tool-label:hover,
+        .column-tool-icon:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .column-tool-icon.active {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .column-tool-icon svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            display: block;
+        }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 0; font-size: 14px; }
+        th:first-child { border-top-left-radius: 8px; border-left: 1px solid var(--table-border); }
+        th:last-child { border-top-right-radius: 8px; border-right: 1px solid var(--table-border); }
+        th, td { text-align: left; border-bottom: 1px solid var(--table-border); white-space: nowrap; }
+        th { padding: 3px 16px; }
+        td { padding: 12px 16px; }
+        
+        th { 
+            background-color: var(--th-bg); font-weight: 700; cursor: pointer; user-select: none; 
+            text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; 
+            color: var(--status-color); border-top: 1px solid var(--table-border); 
+            transition: background 0.2s;
+        }
+        th.header-draggable { cursor: grab; }
+        th.header-draggable:active { cursor: grabbing; }
+        th:hover { background-color: var(--th-hover); color: var(--text-color); }
+
+        .header-content {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header-label {
+            display: inline-block;
+        }
+        .sort-controls {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: stretch;
+            border: 1px solid var(--container-bg);
+            border-radius: 6px;
+            overflow: hidden;
+            background: color-mix(in srgb, var(--container-bg) 78%, transparent);
+        }
+        .sort-arrow-btn {
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+            padding: 0;
+            margin: 0;
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 9px;
+            line-height: 1;
+            font-weight: 700;
+        }
+        .sort-arrow-btn + .sort-arrow-btn {
+            border-left: none;
+            border-top: 1px solid var(--container-bg);
+        }
+        .sort-arrow-btn:hover {
+            background: var(--container-bg);
+            color: var(--text-color);
+        }
+        .sort-arrow-btn.active {
+            background: var(--container-bg);
+            color: var(--success-color);
+        }
+        
+        /* New Table Header Drag Styles */
+        th.header-dragging { opacity: 0.4; }
+        th.header-drag-over { border-left: 4px solid var(--primary-color) !important; background-color: var(--th-hover); }
+
+        tbody tr:hover { background-color: rgba(0, 0, 0, 0.03); }
+        @media (prefers-color-scheme: dark) { tbody tr:hover { background-color: rgba(255, 255, 255, 0.03); } }
+        .online { color: var(--success-color); font-weight: 700; }
+        .sort-icon { font-size: 10px; margin-left: 6px; color: var(--primary-color); }
+
+        /* --- Modal Styling --- */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--modal-bg); z-index: 1000; align-items: center; justify-content: center; }
+        .modal { background: var(--container-bg); padding: 25px; border-radius: 12px; width: 400px; max-width: 90%; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .modal h3 { margin-top: 0; }
+        
+        .col-item { display: flex; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--table-border); background: var(--container-bg); cursor: grab; transition: padding 0.2s ease, height 0.2s ease, opacity 0.2s ease; overflow: hidden; user-select: none; }
+        .col-item:active { cursor: grabbing; }
+        .col-item.collapsed-slot { padding-top: 0; padding-bottom: 0; height: 0; opacity: 0; border-bottom: none; }
+        .col-item.drag-over { padding-top: 48px; }
+        
+        .drag-handle { color: var(--status-color); margin-right: 12px; font-size: 16px; user-select: none; }
+        .col-item input[type="checkbox"] { margin-right: 10px; cursor: pointer; transform: scale(1.2); }
+        .col-item span.label-text { font-weight: 500; user-select: none; pointer-events: none; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+        /* Tablet/mobile layout adaptations */
+        @media (max-width: 980px) {
+            .app-shell { grid-template-columns: 1fr; gap: 14px; }
+            .sidebar { position: static; }
+            .sidebar { min-height: 0; height: auto; }
+            .sidebar nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .menu-item { min-height: 64px; }
+            .sidebar-title { font-size: 14px; letter-spacing: 0.02em; text-transform: none; text-align: left; }
+            .main-content { padding: 0 6px 6px; }
+            .sidebar-toggle { display: none; }
+        }
+
+        @media (max-width: 640px) {
+            .container { padding: 18px; }
+            .sidebar nav { grid-template-columns: 1fr; }
+            input[type="text"] { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- App shell: sidebar navigation + active content view -->
+<div class="app-shell">
+    <!-- Left navigation rail -->
+    <aside class="sidebar">
+        <button id="sidebarToggleBtn" class="sidebar-toggle" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">&laquo;</button>
+
+        <!-- Primary navigation -->
+        <nav>
+            <button class="menu-item active" onclick="selectView('dashboardView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3 10.5L12 3l9 7.5"></path>
+                        <path d="M5 9.5V21h14V9.5"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Home</span>
+            </button>
+            <button class="menu-item" onclick="selectView('savedRangesView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M4 6h16v12H4z"></path>
+                        <path d="M12 6v12"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Ranges</span>
+            </button>
+            <button class="menu-item" onclick="selectView('siteMapView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3 7l6-2 6 2 6-2v12l-6 2-6-2-6 2z"></path>
+                        <path d="M9 5v12"></path>
+                        <path d="M15 7v12"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Map</span>
+            </button>
+        </nav>
+
+        <!-- Bottom-anchored actions/status -->
+        <div class="sidebar-bottom">
+            <button class="menu-item" onclick="selectView('settingsView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.3 2.3-3-3z"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Settings</span>
+            </button>
+            <div class="sidebar-version">v1.0.1</div>
+        </div>
+    </aside>
+
+    <!-- Main area with switchable views -->
+    <main class="main-content">
+        <!-- Dashboard view: scan controls + miner table -->
+        <section id="dashboardView" class="view-panel active">
+            <div class="container">
+                <h2 class="app-title">The Miner Locator</h2>
+                
+                <div class="controls">
+                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                        <div class="control-group">
+                            <label for="rangeInput">IP Range</label>
+                            <input type="text" id="rangeInput" placeholder="10.10.1.1-10.10.8.255" value="10.10.1.1-10.10.8.255">
+                        </div>
+                        <button onclick="startScan()" id="scanBtn">Scan Network</button>
+                        <button class="secondary" onclick="loadTestData()" id="testBtn">Load Test Data</button>
+                        <span id="status">Ready.</span>
+                    </div>
+                </div>
+
+                <div class="table-tools">
+                    <div class="column-toolbox" aria-label="Column tools">
+                        <button class="column-tool-label" type="button" onclick="openModal()" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
+                        <button id="toggleColumnDragBtn" class="column-tool-icon" type="button" onclick="toggleColumnDrag()" title="Enable column drag" aria-label="Enable column drag" aria-pressed="false">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M7.5 11.5V7.3a1.3 1.3 0 0 1 2.6 0v3.2"></path>
+                                <path d="M10.1 10.5V5.9a1.3 1.3 0 0 1 2.6 0v4.6"></path>
+                                <path d="M12.7 10.8V6.9a1.3 1.3 0 0 1 2.6 0v5.1"></path>
+                                <path d="M15.3 11.4v-2a1.3 1.3 0 0 1 2.6 0v6.1a5.5 5.5 0 0 1-5.5 5.5h-1.6a4.9 4.9 0 0 1-4.3-2.5L4.8 15a1.3 1.3 0 0 1 2.2-1.4l1.4 2.2V11.5"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr id="tableHeaderRow">
+                                </tr>
+                        </thead>
+                        <tbody id="minerTableBody">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Placeholder for saved IP ranges feature -->
+        <section id="savedRangesView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Saved Ranges</h3>
+                <p>This section is reserved for storing IP ranges with custom titles.</p>
+            </div>
+        </section>
+
+        <!-- Placeholder for site mapping feature -->
+        <section id="siteMapView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Site Map</h3>
+                <p>Use this area to visualize groups, racks, or locations for miner IPs.</p>
+            </div>
+        </section>
+
+        <!-- Settings view placeholder -->
+        <section id="settingsView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Settings</h3>
+                <p>Future system preferences and scanner options can live here.</p>
+            </div>
+        </section>
+    </main>
+</div>
+
+<!-- Column-management modal -->
+<div class="modal-overlay" id="colModal">
+    <div class="modal">
+        <h3>Manage Columns</h3>
+        <p style="font-size: 13px; color: var(--status-color); margin-bottom: 15px;">Drag to reorder. Check to show/hide.</p>
+        <div id="colList"></div>
+        <div class="modal-footer">
+            <button id="applyBtn" onclick="applyChanges()" disabled>Apply</button>
+            <button class="secondary" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // SSE connection + table state
+    let eventSource;
+    let minersData = []; 
+    let sortCol = 'ip';  
+    let sortAsc = true; 
+    let columnDragEnabled = false;
+
+    // Used to prevent sorting when finishing a drag
+    let isDraggingHeader = false; 
+    let draggedHeaderId = null;
+
+    // Master column configuration for table + modal
+    let columns = [
+        { id: 'ip', label: 'IP Address', visible: true },
+        { id: 'status', label: 'Status', visible: true },
+        { id: 'hostname', label: 'Hostname', visible: true },
+        { id: 'mac', label: 'MAC Address', visible: false },
+        { id: 'os', label: 'OS', visible: false },
+        { id: 'minerType', label: 'Miner Type', visible: true },
+        { id: 'cbType', label: 'Ctrl Board', visible: false },
+        { id: 'temp', label: 'Temp', visible: true },
+        { id: 'hashrate', label: 'Hashrate (TH/s)', visible: true },
+        { id: 'hashboards', label: 'Hashboards', visible: true },
+        { id: 'pools', label: 'Pools', visible: true }
+    ];
+
+    let pendingColumns = []; 
+    let dragStartIndex = -1;
+
+    // Initial render on page load
+    window.onload = () => {
+        renderHeaders();
+        renderTable();
+        updateColumnDragButton();
+    };
+
+    // Switches between sidebar views and updates active menu state
+    function selectView(viewId, clickedButton) {
+        document.querySelectorAll('.view-panel').forEach(panel => panel.classList.remove('active'));
+        document.querySelectorAll('.menu-item').forEach(item => item.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+        clickedButton.classList.add('active');
+    }
+
+    // Collapses/expands sidebar rail and updates button semantics
+    function toggleSidebar() {
+        const shell = document.querySelector('.app-shell');
+        const toggleBtn = document.getElementById('sidebarToggleBtn');
+        const isCollapsed = shell.classList.toggle('sidebar-collapsed');
+
+        toggleBtn.innerHTML = isCollapsed ? '&raquo;' : '&laquo;';
+        toggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+        toggleBtn.setAttribute('title', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        toggleBtn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    }
+
+    // Toggles header drag mode on/off from the hand control
+    function toggleColumnDrag() {
+        columnDragEnabled = !columnDragEnabled;
+        isDraggingHeader = false;
+        draggedHeaderId = null;
+        updateColumnDragButton();
+        renderHeaders();
+    }
+
+    // Keeps the hand control text and pressed state in sync
+    function updateColumnDragButton() {
+        const dragBtn = document.getElementById('toggleColumnDragBtn');
+        if (!dragBtn) return;
+
+        dragBtn.classList.toggle('active', columnDragEnabled);
+        dragBtn.setAttribute('aria-pressed', String(columnDragEnabled));
+        dragBtn.setAttribute('title', columnDragEnabled ? 'Disable column drag' : 'Enable column drag');
+        dragBtn.setAttribute('aria-label', columnDragEnabled ? 'Disable column drag' : 'Enable column drag');
+    }
+
+    // --- Main Table Header Drag Logic ---
+    function headerDragStart(e, id) {
+        if (!columnDragEnabled) {
+            e.preventDefault();
+            return;
+        }
+
+        isDraggingHeader = true;
+        draggedHeaderId = id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', id);
+        setTimeout(() => e.target.classList.add('header-dragging'), 0);
+    }
+
+    function headerDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+    
+    function headerDragEnter(e, el) { 
+        e.preventDefault(); 
+        el.classList.add('header-drag-over'); 
+    }
+    
+    function headerDragLeave(e, el) { 
+        el.classList.remove('header-drag-over'); 
+    }
+
+    function headerDrop(e, targetId) {
+        e.preventDefault();
+        e.currentTarget.classList.remove('header-drag-over');
+        
+        if (draggedHeaderId === targetId || !draggedHeaderId) return;
+
+        // Find positions in the master array
+        const fromIndex = columns.findIndex(c => c.id === draggedHeaderId);
+        const toIndex = columns.findIndex(c => c.id === targetId);
+        
+        // Swap them in the master array
+        const item = columns.splice(fromIndex, 1)[0];
+        columns.splice(toIndex, 0, item);
+        
+        renderHeaders();
+        renderTable();
+    }
+
+    function headerDragEnd(e) {
+        e.target.classList.remove('header-dragging');
+        document.querySelectorAll('th').forEach(el => el.classList.remove('header-drag-over'));
+        
+        // Give the browser 50ms to realize we dropped it before allowing clicks again
+        // This prevents the table from accidentally sorting when you drop a column
+        setTimeout(() => { 
+            isDraggingHeader = false; 
+            draggedHeaderId = null; 
+        }, 50);
+    }
+
+
+    // --- Modal Logic ---
+    function openModal() { 
+        pendingColumns = JSON.parse(JSON.stringify(columns)); 
+        document.getElementById('applyBtn').disabled = true; 
+        renderModalList();
+        document.getElementById('colModal').style.display = 'flex'; 
+    }
+
+    function closeModal() { document.getElementById('colModal').style.display = 'none'; }
+
+    function applyChanges() {
+        columns = JSON.parse(JSON.stringify(pendingColumns));
+        renderHeaders();
+        renderTable();
+        document.getElementById('applyBtn').disabled = true; 
+    }
+
+    function markAsChanged() { document.getElementById('applyBtn').disabled = false; }
+    
+    function renderModalList() {
+        const list = document.getElementById('colList');
+        list.innerHTML = '';
+        pendingColumns.forEach((col, index) => {
+            list.innerHTML += `
+                <div class="col-item" draggable="true"
+                     ondragstart="modalDragStart(event, ${index})"
+                     ondragover="modalDragOver(event)"
+                     ondragenter="modalDragEnter(event, this)"
+                     ondragleave="modalDragLeave(event, this)"
+                     ondrop="modalDrop(event, ${index})"
+                     ondragend="modalDragEnd(event)">
+                    <span class="drag-handle">☰</span>
+                    <input type="checkbox" ${col.visible ? 'checked' : ''} onchange="toggleCol(${index})">
+                    <span class="label-text">${col.label}</span>
+                </div>
+            `;
+        });
+    }
+
+    function toggleCol(index) {
+        pendingColumns[index].visible = !pendingColumns[index].visible;
+        markAsChanged(); 
+    }
+
+    function modalDragStart(e, index) {
+        dragStartIndex = index;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', index); 
+        setTimeout(() => { e.target.classList.add('collapsed-slot'); }, 0);
+    }
+    function modalDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+    function modalDragEnter(e, el) { e.preventDefault(); el.classList.add('drag-over'); }
+    function modalDragLeave(e, el) { if (!el.contains(e.relatedTarget)) el.classList.remove('drag-over'); }
+    
+    function modalDrop(e, dropIndex) {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drag-over');
+        if (dragStartIndex === dropIndex) return;
+        const item = pendingColumns.splice(dragStartIndex, 1)[0];
+        pendingColumns.splice(dropIndex, 0, item);
+        markAsChanged(); 
+        renderModalList(); 
+    }
+    
+    function modalDragEnd(e) {
+        e.target.classList.remove('collapsed-slot');
+        document.querySelectorAll('.col-item').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    // --- Table Rendering Logic ---
+    function renderHeaders() {
+        const headerRow = document.getElementById('tableHeaderRow');
+        headerRow.innerHTML = '';
+        
+        columns.filter(c => c.visible).forEach(col => {
+            const draggable = columnDragEnabled ? 'true' : 'false';
+            const dragClass = columnDragEnabled ? 'header-draggable' : '';
+            const ascActive = sortCol === col.id && sortAsc ? 'active' : '';
+            const descActive = sortCol === col.id && !sortAsc ? 'active' : '';
+            
+            headerRow.innerHTML += `
+                <th class="${dragClass}" draggable="${draggable}"
+                    ondragstart="headerDragStart(event, '${col.id}')"
+                    ondragover="headerDragOver(event)"
+                    ondragenter="headerDragEnter(event, this)"
+                    ondragleave="headerDragLeave(event, this)"
+                    ondrop="headerDrop(event, '${col.id}')"
+                    ondragend="headerDragEnd(event)">
+                    <span class="header-content">
+                        <span class="header-label">${col.label}</span>
+                        <span class="sort-controls">
+                            <button class="sort-arrow-btn ${ascActive}" type="button" onclick="setSortDirection('${col.id}', true); event.stopPropagation();" aria-label="Sort ${col.label} ascending">▲</button>
+                            <button class="sort-arrow-btn ${descActive}" type="button" onclick="setSortDirection('${col.id}', false); event.stopPropagation();" aria-label="Sort ${col.label} descending">▼</button>
+                        </span>
+                    </span>
+                </th>
+            `;
+        });
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('minerTableBody');
+        tbody.innerHTML = ""; 
+
+        minersData.sort((a, b) => {
+            let valA = a[sortCol];
+            let valB = b[sortCol];
+
+            if (sortCol === 'ip') {
+                valA = ipToNum(valA); valB = ipToNum(valB);
+            } else if (['hashrate', 'temp'].includes(sortCol)) {
+                valA = parseFloat(valA) || 0; valB = parseFloat(valB) || 0;
+            }
+
+            if (valA < valB) return sortAsc ? -1 : 1;
+            if (valA > valB) return sortAsc ? 1 : -1;
+            return 0;
+        });
+
+        const visibleCols = columns.filter(c => c.visible);
+        minersData.forEach(miner => {
+            const tr = document.createElement('tr');
+            let rowHtml = '';
+            
+            visibleCols.forEach(col => {
+                if (col.id === 'status') {
+                    rowHtml += `<td class="online">Online</td>`;
+                } else if (col.id === 'ip') {
+                    rowHtml += `<td><strong>${miner.ip}</strong></td>`;
+                } else if (col.id === 'hashrate') {
+                    const hr = miner.hashrate;
+                    rowHtml += `<td>${hr && hr !== 'N/A' ? hr + ' TH/s' : 'N/A'}</td>`;
+                } else {
+                    rowHtml += `<td>${miner[col.id] || "N/A"}</td>`;
+                }
+            });
+            
+            tr.innerHTML = rowHtml;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function ipToNum(ip) { return ip.split('.').reduce((int, oct) => (int << 8) + parseInt(oct, 10), 0) >>> 0; }
+
+    // Sorting now happens from header arrow controls only
+    function setSortDirection(column, ascending) {
+        if (isDraggingHeader) return;
+
+        sortCol = column;
+        sortAsc = ascending;
+        renderHeaders();
+        renderTable();
+    }
+
+    // Loads local mock miner rows for frontend-only testing
+    function loadTestData() {
+        const status = document.getElementById('status');
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        const btn = document.getElementById('scanBtn');
+        btn.disabled = false;
+        btn.innerText = 'Scan Network';
+
+        minersData = [
+            { ip: '10.10.1.14', status: 'online', hashrate: '134.72', temp: '68',  hostname: 'antminer-01', mac: 'A4:56:02:3C:11:0A', os: 'AntMiner',  minerType: 'Antminer S19 Pro',   cbType: 'BM1362', hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.1.15', status: 'online', hashrate: '110.05', temp: '71',  hostname: 'antminer-02', mac: 'A4:56:02:3C:11:0B', os: 'AntMiner',  minerType: 'Antminer S19',       cbType: 'BM1362', hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.2.8',  status: 'online', hashrate: '198.44', temp: '65',  hostname: 'whatsminer-01', mac: 'B0:19:C6:7A:22:FF', os: 'WhatsMiner', minerType: 'WhatsMiner M50S', cbType: 'SJ346',  hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.2.9',  status: 'online', hashrate: '201.10', temp: '63',  hostname: 'whatsminer-02', mac: 'B0:19:C6:7A:22:FE', os: 'WhatsMiner', minerType: 'WhatsMiner M50S', cbType: 'SJ346',  hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.3.22', status: 'online', hashrate: '84.00',  temp: '74',  hostname: 'antminer-03', mac: 'A4:56:02:3C:22:1C', os: 'AntMiner',  minerType: 'Antminer S17 Pro',   cbType: 'BM1397', hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.3.23', status: 'online', hashrate: '56.33',  temp: '79',  hostname: 'antminer-04', mac: 'A4:56:02:3C:22:1D', os: 'AntMiner',  minerType: 'Antminer T17+',      cbType: 'BM1397', hashboards: '2/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.4.5',  status: 'online', hashrate: '335.00', temp: '60',  hostname: 'antminer-05', mac: 'A4:56:02:4D:33:AA', os: 'AntMiner',  minerType: 'Antminer S21 Pro',   cbType: 'BM1368', hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.4.6',  status: 'online', hashrate: '329.88', temp: '61',  hostname: 'antminer-06', mac: 'A4:56:02:4D:33:AB', os: 'AntMiner',  minerType: 'Antminer S21 Pro',   cbType: 'BM1368', hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.5.11', status: 'online', hashrate: '145.00', temp: '70',  hostname: 'avalon-01',   mac: 'C4:7F:51:9B:44:BC', os: 'cgminer',   minerType: 'Avalon 1246',        cbType: 'A3206',  hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.5.12', status: 'online', hashrate: '0.00',   temp: 'N/A', hostname: 'avalon-02',   mac: 'C4:7F:51:9B:44:BD', os: 'cgminer',   minerType: 'Avalon 1246',        cbType: 'A3206',  hashboards: '0/3', pools: 'N/A' },
+        ];
+
+        status.innerText = `Done. Total: ${minersData.length}`;
+        status.style.color = 'var(--success-color)';
+        renderTable();
+    }
+
+    // Starts backend scan stream and updates rows as events arrive
+    function startScan() {
+        const ipRange = document.getElementById('rangeInput').value;
+        const btn = document.getElementById('scanBtn');
+        const status = document.getElementById('status');
+        
+        if (eventSource) eventSource.close();
+
+        btn.disabled = true;
+        btn.innerText = "Scanning...";
+        minersData = []; 
+        renderTable();   
+        
+        status.innerText = `Found 0.`;
+        status.style.color = "var(--status-color)"; 
+
+        eventSource = new EventSource(`/api/scan?range=${encodeURIComponent(ipRange)}`);
+
+        eventSource.onmessage = function(event) {
+            const miner = JSON.parse(event.data);
+            
+            const summaryData = miner.data.SUMMARY && miner.data.SUMMARY[0] ? miner.data.SUMMARY[0] : {};
+            let hashrateTHs = 0;
+            if (summaryData['GHS 5s']) hashrateTHs = (parseFloat(summaryData['GHS 5s']) / 1000).toFixed(2);
+            else if (summaryData['GHS av']) hashrateTHs = (parseFloat(summaryData['GHS av']) / 1000).toFixed(2);
+
+            minersData.push({
+                ip: miner.ip,
+                status: 'online',
+                hashrate: hashrateTHs,
+                temp: "N/A",         
+                hostname: "N/A",     
+                mac: "N/A",          
+                os: "N/A",           
+                minerType: "N/A",    
+                cbType: "N/A",       
+                hashboards: "N/A",   
+                pools: "N/A"         
+            });
+
+            status.innerText = `Found ${minersData.length}.`;
+            renderTable();
+        };
+
+        eventSource.addEventListener('done', function() {
+            eventSource.close();
+            btn.disabled = false;
+            btn.innerText = "Scan Network";
+            status.innerText = `Done. Total: ${minersData.length}`;
+            status.style.color = "var(--success-color)";
+        });
+
+        eventSource.onerror = function() {
+            eventSource.close();
+            btn.disabled = false;
+            btn.innerText = "Scan Network";
+            status.innerText = "Connection lost.";
+            status.style.color = "var(--error-color)";
+        };
+    }
+</script>
+
+</body>
+</html>
