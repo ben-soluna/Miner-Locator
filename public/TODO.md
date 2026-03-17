@@ -40,7 +40,9 @@
 - [x] Set active sort arrow color to orange and tighten header vertical spacing
 - [x] Move Edit Columns control to left above IP and place label before grab hand
 - [x] Keep Edit Columns toolbar fixed during horizontal table scroll
-- [ ] A way to save IP ranges with a Title for each range
+- [x] A way to save IP ranges with a Title for each range
+- [x] Build IP Ranges tab with subnet host-range builder and direct CIDR/range entry
+- [ ] Add a Settings control to resize the sidebar width
 - [ ] Create a site map view
 
 ## Backend (Next Steps)

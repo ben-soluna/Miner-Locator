@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Miner Locator</title>
+    <style>
+        /* --- CSS Variables & Resets --- */
+        :root {
+            --bg-color: #f0f2f5; 
+            --container-bg: #ffffff;
+            --text-color: #000000; 
+            --border-color: #c0c9d8; 
+            --table-border: #e2e8f0;
+            --th-bg: #f1f5f9; 
+            --th-hover: #e2e8f0;
+            --input-bg: #ffffff;
+            --success-color: #ea580c; 
+            --error-color: #cc0000; 
+            --status-color: #333333; 
+            --primary-color: #1d4ed8; 
+            --primary-hover: #1e3a8a;
+            --primary-text: #ffffff;
+            --gradient-accent: #00bfff; 
+            --container-shadow: 0 20px 40px rgba(0, 0, 0, 0.12); 
+            --corner-radius: 16px; 
+            --modal-bg: rgba(0,0,0,0.5);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #0d0d0d;
+                --container-bg: #1a1d21;
+                --text-color: #ffffff; 
+                --border-color: #4a5568; 
+                --table-border: #2d3748;
+                --th-bg: #2d3748; 
+                --th-hover: #4a5568;
+                --input-bg: #111111;
+                --success-color: #fb923c; 
+                --error-color: #f87171; 
+                --status-color: #e2e8f0; 
+                --primary-color: #3b82f6;
+                --primary-hover: #2563eb;
+                --gradient-accent: #34d399; 
+                --container-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        * { box-sizing: border-box; } 
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 0; background: var(--bg-color); color: var(--text-color); margin: 0; line-height: 1.5; }
+
+        /* App shell and sidebar rail layout */
+        .app-shell { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 0; width: 100%; min-height: 100vh; }
+        .sidebar {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: visible;
+        }
+        .sidebar-header {
+            display: none;
+        }
+        .sidebar-title {
+            display: none;
+        }
+        /* Sidebar menu tiles */
+        .sidebar nav { display: flex; flex-direction: column; }
+        .menu-item {
+            width: 46px;
+            text-align: left;
+            border: 0;
+            border-left: 3px solid transparent;
+            border-radius: 0;
+            background: var(--container-bg);
+            color: var(--status-color);
+            padding: 10px 10px;
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.2;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            min-height: 48px;
+            border-bottom: 1px solid var(--table-border);
+            overflow: hidden;
+            transition: width 0.2s ease, background 0.2s ease, color 0.2s ease;
+            white-space: nowrap;
+            position: relative;
+            z-index: 2;
+        }
+        .menu-item:hover {
+            width: 168px;
+            background: var(--th-bg);
+            color: var(--text-color);
+            z-index: 3;
+        }
+        button.menu-item:hover:not(:disabled) { background: var(--th-bg); color: var(--text-color); }
+        .menu-item.active {
+            background: var(--th-bg);
+            border-left-color: #f2b705;
+            color: var(--text-color);
+        }
+        .menu-item .menu-icon {
+            color: var(--status-color);
+            line-height: 1;
+        }
+        .menu-item .menu-icon svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .menu-item.active .menu-icon { color: var(--text-color); }
+        .menu-item .menu-label {
+            display: inline-block;
+            opacity: 0;
+            transform: translateX(-4px);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            pointer-events: none;
+        }
+        .menu-item:hover .menu-label {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        /* Footer area inside sidebar */
+        .sidebar-bottom {
+            margin-top: auto;
+            border-top: 1px solid var(--table-border);
+        }
+        .sidebar-bottom .menu-item {
+            border-bottom: 1px solid var(--table-border);
+        }
+        .sidebar-version {
+            padding: 10px 6px 12px;
+            text-align: center;
+            font-size: 9px;
+            color: #b6bfcb;
+            line-height: 1.3;
+            display: none;
+        }
+        /* Main panel */
+        .main-content { min-width: 0; padding: 10px; }
+        /* View switching containers */
+        .view-panel { display: none; }
+        .view-panel.active { display: block; }
+        .placeholder-card { background: var(--container-bg); padding: 24px; border-radius: 8px; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .placeholder-card h3 { margin-top: 0; margin-bottom: 10px; }
+
+        .site-map-shell {
+            display: block;
+        }
+        .site-map-main {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            box-shadow: none;
+            padding: 10px;
+        }
+        .site-map-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        .site-map-toolbar h3 {
+            margin: 0;
+            margin-right: auto;
+            font-size: 20px;
+            letter-spacing: 0.01em;
+        }
+        .site-map-canvas {
+            height: 520px;
+            border: 1px solid var(--table-border);
+            border-radius: 0;
+            background:
+                linear-gradient(90deg, color-mix(in srgb, var(--table-border) 55%, transparent) 1px, transparent 1px) 0 0/28px 28px,
+                linear-gradient(0deg, color-mix(in srgb, var(--table-border) 55%, transparent) 1px, transparent 1px) 0 0/28px 28px,
+                linear-gradient(135deg, color-mix(in srgb, var(--th-bg) 65%, transparent), transparent);
+            position: relative;
+            overflow: hidden;
+        }
+        .site-map-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--status-color);
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .site-node {
+            position: absolute;
+            min-width: 160px;
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            background: var(--container-bg);
+            box-shadow: none;
+            padding: 6px;
+            cursor: default;
+            user-select: none;
+        }
+        .site-node.site-node-editable { cursor: grab; }
+        .site-node.site-node-editable:active { cursor: grabbing; }
+        .site-node-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .site-node-title {
+            font-weight: 600;
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .site-node-delete {
+            width: 20px;
+            height: 20px;
+            border: none;
+            border-radius: 0;
+            padding: 0;
+            font-size: 12px;
+            line-height: 1;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .site-node-delete:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .site-node-building { border-left: 4px solid #f59e0b; }
+        .site-node-rack { border-left: 4px solid #22c55e; }
+        .site-node-miner { border-left: 4px solid #3b82f6; }
+        .site-node-offline { border-left-color: #ef4444; }
+        .site-node-selected {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 1px;
+        }
+        .site-node-resize-handle {
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 12px;
+            height: 12px;
+            border-radius: 0;
+            background: color-mix(in srgb, var(--primary-color) 65%, transparent);
+            border: 1px solid color-mix(in srgb, var(--primary-hover) 70%, transparent);
+            cursor: nwse-resize;
+        }
+        .site-node-resize-handle:hover {
+            background: var(--primary-color);
+        }
+        .site-node-toggle {
+            width: 20px;
+            height: 20px;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+            font-size: 11px;
+            line-height: 1;
+            padding: 0;
+            border-radius: 0;
+            cursor: pointer;
+        }
+        .site-node-toggle:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .site-map-context {
+            margin-left: auto;
+            min-height: 30px;
+            min-width: 140px;
+            width: auto;
+            font-size: 11px;
+            color: var(--status-color);
+            border: 1px solid var(--table-border);
+            border-radius: 0;
+            padding: 6px 8px;
+            background: var(--th-bg);
+        }
+
+        .ip-ranges-panel {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            box-shadow: var(--container-shadow);
+            padding: 20px;
+        }
+        .ip-ranges-panel h3 {
+            margin: 0 0 6px;
+        }
+        .ip-ranges-muted {
+            margin: 0 0 16px;
+            color: var(--status-color);
+            font-size: 13px;
+        }
+        .range-config-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(0, 2.2fr) auto;
+            gap: 12px;
+            align-items: start;
+        }
+        .range-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .range-field input,
+        .range-field select {
+            width: 100%;
+            background: var(--input-bg);
+            color: var(--text-color);
+        }
+        .range-mode-group {
+            margin-bottom: 12px;
+        }
+        .range-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .range-actions-inline {
+            display: inline-flex;
+            gap: 10px;
+            align-items: center;
+            padding-top: 28px;
+        }
+        .range-preview {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--table-border);
+            border-radius: 8px;
+            background: var(--th-bg);
+            font-size: 13px;
+            color: var(--status-color);
+            word-break: break-word;
+        }
+        .saved-range-list {
+            margin-top: 16px;
+            border: 1px solid var(--table-border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .saved-range-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(0, 2.2fr) auto;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--table-border);
+            background: var(--container-bg);
+        }
+        .saved-range-row:last-child {
+            border-bottom: none;
+        }
+        .saved-range-header {
+            background: var(--th-bg);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--status-color);
+        }
+        .saved-range-title {
+            font-weight: 700;
+        }
+        .saved-range-expression {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 14px;
+            color: var(--status-color);
+            overflow-wrap: anywhere;
+        }
+        .saved-range-actions {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .saved-action-icon {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .saved-action-icon:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .saved-action-icon svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            display: block;
+        }
+        .range-inline-meta {
+            font-size: 12px;
+            color: var(--status-color);
+            margin-top: 4px;
+        }
+
+        .container { max-width: none; margin: 0; background: var(--container-bg); padding: 30px; border-radius: 8px; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .app-title { margin-top: 0; margin-bottom: 25px; font-size: 38px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(90deg, #ea580c, #f59e0b); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: inline-block; }
+
+        /* --- Controls --- */
+        .controls { display: flex; gap: 15px; margin-bottom: 0; align-items: center; flex-wrap: wrap; background: var(--th-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); justify-content: space-between; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+        .control-group { display: flex; align-items: center; gap: 10px; }
+        label { font-weight: 700; font-size: 14px; color: var(--status-color); }
+        input, button { padding: 12px 16px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; transition: all 0.2s; }
+        input[type="text"] { width: 250px; background: var(--input-bg); color: var(--text-color); font-weight: 500; }
+        
+        button { background: var(--primary-color); color: var(--primary-text); cursor: pointer; border: none; font-weight: 700; }
+        button:hover:not(:disabled) { background: var(--primary-hover); }
+        button.secondary { background: transparent; border: 1px solid var(--primary-color); color: var(--primary-color); }
+        button.secondary:hover { background: var(--primary-color); color: var(--primary-text); }
+        button:disabled { background: var(--border-color); cursor: not-allowed; color: var(--status-color); opacity: 0.6; }
+        
+        .icon-btn { font-size: 18px; padding: 10px 14px; display: flex; align-items: center; justify-content: center; }
+        #status { font-weight: 700; font-size: 14px; color: var(--status-color); margin-left: 10px; }
+
+        /* --- Table Styling --- */
+        .table-wrapper { overflow-x: auto; }
+        .table-tools { display: flex; justify-content: flex-start; margin: 0; padding: 10px 0; }
+        .column-toolbox {
+            padding: 0;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: stretch;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--table-border);
+            background: var(--container-bg);
+            color: var(--status-color);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+        }
+        .column-tool-label {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 12px;
+            min-height: 32px;
+            border: none;
+            border-left: 1px solid var(--table-border);
+            background: transparent;
+            color: inherit;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            text-align: center;
+        }
+        .column-tool-icon {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 8px 0 0 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .column-tool-label:hover,
+        .column-tool-icon:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .column-tool-icon.active {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .column-tool-icon svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            display: block;
+        }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 0; font-size: 14px; }
+        th:first-child { border-top-left-radius: 8px; border-left: 1px solid var(--table-border); }
+        th:last-child { border-top-right-radius: 8px; border-right: 1px solid var(--table-border); }
+        th, td { text-align: left; border-bottom: 1px solid var(--table-border); white-space: nowrap; }
+        th { padding: 3px 16px; }
+        td { padding: 12px 16px; }
+        
+        th { 
+            background-color: var(--th-bg); font-weight: 700; cursor: pointer; user-select: none; 
+            text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; 
+            color: var(--status-color); border-top: 1px solid var(--table-border); 
+            transition: background 0.2s;
+        }
+        th.header-draggable { cursor: grab; }
+        th.header-draggable:active { cursor: grabbing; }
+        th:hover { background-color: var(--th-hover); color: var(--text-color); }
+
+        .header-content {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header-label {
+            display: inline-block;
+        }
+        .sort-controls {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: stretch;
+            border: 1px solid var(--container-bg);
+            border-radius: 6px;
+            overflow: hidden;
+            background: color-mix(in srgb, var(--container-bg) 78%, transparent);
+        }
+        .sort-arrow-btn {
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+            padding: 0;
+            margin: 0;
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 9px;
+            line-height: 1;
+            font-weight: 700;
+        }
+        .sort-arrow-btn + .sort-arrow-btn {
+            border-left: none;
+            border-top: 1px solid var(--container-bg);
+        }
+        .sort-arrow-btn:hover {
+            background: var(--container-bg);
+            color: var(--text-color);
+        }
+        .sort-arrow-btn.active {
+            background: var(--container-bg);
+            color: var(--success-color);
+        }
+        
+        /* New Table Header Drag Styles */
+        th.header-dragging { opacity: 0.4; }
+        th.header-drag-over { border-left: 4px solid var(--primary-color) !important; background-color: var(--th-hover); }
+
+        tbody tr:hover { background-color: rgba(0, 0, 0, 0.03); }
+        @media (prefers-color-scheme: dark) { tbody tr:hover { background-color: rgba(255, 255, 255, 0.03); } }
+        .online { color: var(--success-color); font-weight: 700; }
+        .sort-icon { font-size: 10px; margin-left: 6px; color: var(--primary-color); }
+
+        /* --- Modal Styling --- */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--modal-bg); z-index: 1000; align-items: center; justify-content: center; }
+        .modal { background: var(--container-bg); padding: 25px; border-radius: 12px; width: 400px; max-width: 90%; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .modal h3 { margin-top: 0; }
+        
+        .col-item { display: flex; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--table-border); background: var(--container-bg); cursor: grab; transition: padding 0.2s ease, height 0.2s ease, opacity 0.2s ease; overflow: hidden; user-select: none; }
+        .col-item:active { cursor: grabbing; }
+        .col-item.collapsed-slot { padding-top: 0; padding-bottom: 0; height: 0; opacity: 0; border-bottom: none; }
+        .col-item.drag-over { padding-top: 48px; }
+        
+        .drag-handle { color: var(--status-color); margin-right: 12px; font-size: 16px; user-select: none; }
+        .col-item input[type="checkbox"] { margin-right: 10px; cursor: pointer; transform: scale(1.2); }
+        .col-item span.label-text { font-weight: 500; user-select: none; pointer-events: none; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+        /* Tablet/mobile layout adaptations */
+        @media (max-width: 980px) {
+            .app-shell { grid-template-columns: 1fr; gap: 14px; }
+            .sidebar { position: static; }
+            .sidebar { min-height: 0; height: auto; }
+            .sidebar nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .menu-item {
+                width: 100%;
+                min-height: 64px;
+            }
+            .menu-item .menu-label {
+                opacity: 1;
+                transform: none;
+            }
+            .sidebar-title { font-size: 14px; letter-spacing: 0.02em; text-transform: none; text-align: left; }
+            .main-content { padding: 0 6px 6px; }
+        }
+
+        @media (max-width: 640px) {
+            .container { padding: 18px; }
+            .sidebar nav { grid-template-columns: 1fr; }
+            input[type="text"] { width: 100%; }
+            .range-config-grid { grid-template-columns: 1fr; }
+            .saved-range-row { grid-template-columns: 1fr; }
+            .saved-range-actions { justify-content: flex-start; }
+            .site-map-shell { grid-template-columns: 1fr; }
+            .site-map-canvas { height: 440px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- App shell: sidebar navigation + active content view -->
+<div class="app-shell">
+    <!-- Left navigation rail -->
+    <aside class="sidebar">
+        <!-- Primary navigation -->
+        <nav>
+            <button class="menu-item active" onclick="selectView('dashboardView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3 10.5L12 3l9 7.5"></path>
+                        <path d="M5 9.5V21h14V9.5"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Home</span>
+            </button>
+            <button class="menu-item" onclick="selectView('savedRangesView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M22 19H14M2 19H10"></path>
+                        <path d="M12 17V14"></path>
+                        <circle cx="12" cy="19" r="2"></circle>
+                        <path d="M2 11C2 9.34315 3.34315 8 5 8H19C20.6569 8 22 9.34315 22 11C22 12.6569 20.6569 14 19 14H5C3.34315 14 2 12.6569 2 11Z"></path>
+                        <path d="M2 5C2 3.34315 3.34315 2 5 2H19C20.6569 2 22 3.34315 22 5C22 6.65685 20.6569 8 19 8H5C3.34315 8 2 6.65685 2 5Z"></path>
+                        <path d="M13 5L19 5"></path>
+                        <path d="M13 11L19 11"></path>
+                        <circle cx="6" cy="5" r="1" fill="currentColor"></circle>
+                        <circle cx="6" cy="11" r="1" fill="currentColor"></circle>
+                    </svg>
+                </span>
+                <span class="menu-label">IP Ranges</span>
+            </button>
+            <button class="menu-item" disabled title="Site Map disabled">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="6" cy="6" r="2" fill="currentColor"></circle>
+                        <circle cx="18" cy="6" r="2" fill="currentColor"></circle>
+                        <circle cx="12" cy="18" r="2" fill="currentColor"></circle>
+                        <path d="M7.5 7.2L10.8 16"></path>
+                        <path d="M16.5 7.2L13.2 16"></path>
+                        <path d="M8 6h8"></path>
+                        <circle cx="12" cy="12" r="2.2"></circle>
+                    </svg>
+                </span>
+                <span class="menu-label">Site Map (Disabled)</span>
+            </button>
+        </nav>
+
+        <!-- Bottom-anchored actions/status -->
+        <div class="sidebar-bottom">
+            <button class="menu-item" onclick="selectView('settingsView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.3 2.3-3-3z"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Settings</span>
+            </button>
+            <div class="sidebar-version">v1.0.1</div>
+        </div>
+    </aside>
+
+    <!-- Main area with switchable views -->
+    <main class="main-content">
+        <!-- Dashboard view: scan controls + miner table -->
+        <section id="dashboardView" class="view-panel active">
+            <div class="container">
+                <h2 class="app-title">The Miner Locator</h2>
+                
+                <div class="controls">
+                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                        <div class="control-group">
+                            <label for="rangeInput">Quick IP Range</label>
+                            <input type="text" id="rangeInput" placeholder="Enter Range">
+                        </div>
+                        <button class="secondary" onclick="saveQuickRangeToSavedRanges()" id="saveQuickRangeBtn" disabled>Save</button>
+                        <button onclick="startScan()" id="scanBtn">Scan Network</button>
+                        <button class="secondary" onclick="loadTestData()" id="testBtn">Load Test Data</button>
+                        <span id="status">Ready.</span>
+                    </div>
+                </div>
+
+                <div class="table-tools">
+                    <div class="column-toolbox" aria-label="Column tools">
+                        <button class="column-tool-label" type="button" onclick="openModal()" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
+                        <button id="toggleColumnDragBtn" class="column-tool-icon" type="button" onclick="toggleColumnDrag()" title="Enable column drag" aria-label="Enable column drag" aria-pressed="false">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M7.5 11.5V7.3a1.3 1.3 0 0 1 2.6 0v3.2"></path>
+                                <path d="M10.1 10.5V5.9a1.3 1.3 0 0 1 2.6 0v4.6"></path>
+                                <path d="M12.7 10.8V6.9a1.3 1.3 0 0 1 2.6 0v5.1"></path>
+                                <path d="M15.3 11.4v-2a1.3 1.3 0 0 1 2.6 0v6.1a5.5 5.5 0 0 1-5.5 5.5h-1.6a4.9 4.9 0 0 1-4.3-2.5L4.8 15a1.3 1.3 0 0 1 2.2-1.4l1.4 2.2V11.5"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr id="tableHeaderRow">
+                                </tr>
+                        </thead>
+                        <tbody id="minerTableBody">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- IP range configuration and saved presets -->
+        <section id="savedRangesView" class="view-panel">
+            <div class="ip-ranges-panel">
+                <h3>IP Ranges</h3>
+
+                <div class="range-config-grid">
+                    <div class="range-field">
+                        <label for="rangeTitleInput">Range Title</label>
+                        <input id="rangeTitleInput" type="text" placeholder="Description">
+                    </div>
+                    <div class="range-field">
+                        <label for="directRangeInput">IP Range</label>
+                        <input id="directRangeInput" type="text" placeholder="Enter Range" oninput="updateRangeBuilderPreview()">
+                    </div>
+                    <div class="range-actions-inline">
+                        <button type="button" class="secondary" onclick="saveRangeFromBuilder()">Save</button>
+                        <button type="button" class="secondary" onclick="clearRangeBuilderInputs()">Clear</button>
+                    </div>
+                </div>
+
+                <div id="rangeBuilderPreview" class="range-preview">Ready.</div>
+
+                <div class="saved-range-list" id="savedRangesList"></div>
+            </div>
+        </section>
+
+        <!-- Site Map is temporarily disabled -->
+        <section id="siteMapView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Site Map</h3>
+                <p>This feature is temporarily disabled and will be revisited later.</p>
+            </div>
+        </section>
+
+        <!-- Settings view placeholder -->
+        <section id="settingsView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Settings</h3>
+                <p>Future system preferences and scanner options can live here.</p>
+            </div>
+        </section>
+    </main>
+</div>
+
+<!-- Column-management modal -->
+<div class="modal-overlay" id="colModal">
+    <div class="modal">
+        <h3>Manage Columns</h3>
+        <p style="font-size: 13px; color: var(--status-color); margin-bottom: 15px;">Drag to reorder. Check to show/hide.</p>
+        <div id="colList"></div>
+        <div class="modal-footer">
+            <button id="applyBtn" onclick="applyChanges()" disabled>Apply</button>
+            <button class="secondary" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>let eventSource,minersData=[],sortCol="ip",sortAsc=!0,columnDragEnabled=!1,isDraggingHeader=!1,draggedHeaderId=null,columns=[{id:"ip",label:"IP Address",visible:!0},{id:"status",label:"Status",visible:!0},{id:"hostname",label:"Hostname",visible:!0},{id:"mac",label:"MAC Address",visible:!1},{id:"os",label:"OS",visible:!1},{id:"minerType",label:"Miner Type",visible:!0},{id:"cbType",label:"Ctrl Board",visible:!1},{id:"temp",label:"Temp",visible:!0},{id:"hashrate",label:"Hashrate (TH/s)",visible:!0},{id:"hashboards",label:"Hashboards",visible:!0},{id:"pools",label:"Pools",visible:!0}],pendingColumns=[],dragStartIndex=-1,savedRanges=[],selectedSavedRangeIds=[],quickRangeOverrideActive=!1,suppressQuickRangeInputHandler=!1,siteMapItems=[],siteMapCounters={building:1,rack:1,miner:1},activeSiteMapDrag=null,activeSiteMapResize=null,selectedSiteMapItemId=null,siteMapLayoutLocked=!1,siteMapEditMode=!0;const siteMapStorageKey="minerLocator.siteMapLayout";function handleQuickRangeInput(){if(suppressQuickRangeInputHandler)return;const e=document.getElementById("rangeInput").value.trim();quickRangeOverrideActive=e.length>0,updateRangeInfo()}function setQuickRangeInputValue(e){const t=document.getElementById("rangeInput");suppressQuickRangeInputHandler=!0,t.value=e,suppressQuickRangeInputHandler=!1}function selectView(e,t){"siteMapView"!==e&&(document.querySelectorAll(".view-panel").forEach(e=>e.classList.remove("active")),document.querySelectorAll(".menu-item").forEach(e=>e.classList.remove("active")),document.getElementById(e).classList.add("active"),t.classList.add("active"))}function toggleColumnDrag(){columnDragEnabled=!columnDragEnabled,isDraggingHeader=!1,draggedHeaderId=null,updateColumnDragButton(),renderHeaders()}function updateColumnDragButton(){const e=document.getElementById("toggleColumnDragBtn");e&&(e.classList.toggle("active",columnDragEnabled),e.setAttribute("aria-pressed",String(columnDragEnabled)),e.setAttribute("title",columnDragEnabled?"Disable column drag":"Enable column drag"),e.setAttribute("aria-label",columnDragEnabled?"Disable column drag":"Enable column drag"))}function headerDragStart(e,t){columnDragEnabled?(isDraggingHeader=!0,draggedHeaderId=t,e.dataTransfer.effectAllowed="move",e.dataTransfer.setData("text/plain",t),setTimeout(()=>e.target.classList.add("header-dragging"),0)):e.preventDefault()}function headerDragOver(e){e.preventDefault(),e.dataTransfer.dropEffect="move"}function headerDragEnter(e,t){e.preventDefault(),t.classList.add("header-drag-over")}function headerDragLeave(e,t){t.classList.remove("header-drag-over")}function headerDrop(e,t){if(e.preventDefault(),e.currentTarget.classList.remove("header-drag-over"),draggedHeaderId===t||!draggedHeaderId)return;const n=columns.findIndex(e=>e.id===draggedHeaderId),a=columns.findIndex(e=>e.id===t),i=columns.splice(n,1)[0];columns.splice(a,0,i),renderHeaders(),renderTable()}function headerDragEnd(e){e.target.classList.remove("header-dragging"),document.querySelectorAll("th").forEach(e=>e.classList.remove("header-drag-over")),setTimeout(()=>{isDraggingHeader=!1,draggedHeaderId=null},50)}function openModal(){pendingColumns=JSON.parse(JSON.stringify(columns)),document.getElementById("applyBtn").disabled=!0,renderModalList(),document.getElementById("colModal").style.display="flex"}function closeModal(){document.getElementById("colModal").style.display="none"}function applyChanges(){columns=JSON.parse(JSON.stringify(pendingColumns)),renderHeaders(),renderTable(),document.getElementById("applyBtn").disabled=!0}function markAsChanged(){document.getElementById("applyBtn").disabled=!1}function renderModalList(){const e=document.getElementById("colList");e.innerHTML="",pendingColumns.forEach((t,n)=>{e.innerHTML+=`\n                <div class="col-item" draggable="true"\n                     ondragstart="modalDragStart(event, ${n})"\n                     ondragover="modalDragOver(event)"\n                     ondragenter="modalDragEnter(event, this)"\n                     ondragleave="modalDragLeave(event, this)"\n                     ondrop="modalDrop(event, ${n})"\n                     ondragend="modalDragEnd(event)">\n                    <span class="drag-handle">☰</span>\n                    <input type="checkbox" ${t.visible?"checked":""} onchange="toggleCol(${n})">\n                    <span class="label-text">${t.label}</span>\n                </div>\n            `})}function toggleCol(e){pendingColumns[e].visible=!pendingColumns[e].visible,markAsChanged()}function modalDragStart(e,t){dragStartIndex=t,e.dataTransfer.effectAllowed="move",e.dataTransfer.setData("text/plain",t),setTimeout(()=>{e.target.classList.add("collapsed-slot")},0)}function modalDragOver(e){e.preventDefault(),e.dataTransfer.dropEffect="move"}function modalDragEnter(e,t){e.preventDefault(),t.classList.add("drag-over")}function modalDragLeave(e,t){t.contains(e.relatedTarget)||t.classList.remove("drag-over")}function modalDrop(e,t){if(e.preventDefault(),e.currentTarget.classList.remove("drag-over"),dragStartIndex===t)return;const n=pendingColumns.splice(dragStartIndex,1)[0];pendingColumns.splice(t,0,n),markAsChanged(),renderModalList()}function modalDragEnd(e){e.target.classList.remove("collapsed-slot"),document.querySelectorAll(".col-item").forEach(e=>e.classList.remove("drag-over"))}function renderHeaders(){const e=document.getElementById("tableHeaderRow");e.innerHTML="",columns.filter(e=>e.visible).forEach(t=>{const n=columnDragEnabled?"true":"false",a=columnDragEnabled?"header-draggable":"",i=sortCol===t.id&&sortAsc?"active":"",r=sortCol!==t.id||sortAsc?"":"active";e.innerHTML+=`\n                <th class="${a}" draggable="${n}"\n                    ondragstart="headerDragStart(event, '${t.id}')"\n                    ondragover="headerDragOver(event)"\n                    ondragenter="headerDragEnter(event, this)"\n                    ondragleave="headerDragLeave(event, this)"\n                    ondrop="headerDrop(event, '${t.id}')"\n                    ondragend="headerDragEnd(event)">\n                    <span class="header-content">\n                        <span class="header-label">${t.label}</span>\n                        <span class="sort-controls">\n                            <button class="sort-arrow-btn ${i}" type="button" onclick="setSortDirection('${t.id}', true); event.stopPropagation();" aria-label="Sort ${t.label} ascending">▲</button>\n                            <button class="sort-arrow-btn ${r}" type="button" onclick="setSortDirection('${t.id}', false); event.stopPropagation();" aria-label="Sort ${t.label} descending">▼</button>\n                        </span>\n                    </span>\n                </th>\n            `})}function renderTable(){const e=document.getElementById("minerTableBody");e.innerHTML="",minersData.sort((e,t)=>{let n=e[sortCol],a=t[sortCol];return"ip"===sortCol?(n=ipToNum(n),a=ipToNum(a)):["hashrate","temp"].includes(sortCol)&&(n=parseFloat(n)||0,a=parseFloat(a)||0),n<a?sortAsc?-1:1:n>a?sortAsc?1:-1:0});const t=columns.filter(e=>e.visible);minersData.forEach(n=>{const a=document.createElement("tr");let i="";t.forEach(e=>{if("status"===e.id)i+='<td class="online">Online</td>';else if("ip"===e.id)i+=`<td><strong>${n.ip}</strong></td>`;else if("hashrate"===e.id){const e=n.hashrate;i+=`<td>${e&&"N/A"!==e?e+" TH/s":"N/A"}</td>`}else i+=`<td>${n[e.id]||"N/A"}</td>`}),a.innerHTML=i,e.appendChild(a)})}function ipToNum(e){const t=String(e).trim().split(".");if(4!==t.length)return NaN;let n=0;for(const e of t){if(!/^\d+$/.test(e))return NaN;const t=parseInt(e,10);if(t<0||t>255)return NaN;n=(n<<8)+t}return n>>>0}function numToIp(e){return[e>>>24&255,e>>>16&255,e>>>8&255,255&e].join(".")}function getBuiltRangeExpression(){const e=document.getElementById("directRangeInput").value.trim();return e?{expression:e}:{hint:"Examples: 10.10.1.10-10.10.1.200, 10.10.2.0/24, 10.10.3.14"}}function updateRangeBuilderPreview(){const e=document.getElementById("rangeBuilderPreview"),t=getBuiltRangeExpression();if(t.hint)return e.innerText=t.hint,void(e.style.color="#6b7280");if(t.error)return e.innerText=t.error,void(e.style.color="var(--error-color)");const n=parseIPRangeInput(t.expression);if(n.error)return e.innerText=n.error,void(e.style.color="var(--error-color)");const a=totalIPsInRanges(n.ranges);e.innerText=`Preview: ${t.expression} (${a} IP${1===a?"":"s"})`,e.style.color="var(--status-color)"}function applyRangeBuilderToScanner(){const e=getBuiltRangeExpression(),t=document.getElementById("status");if(e.error)return t.innerText=e.error,void(t.style.color="var(--error-color)");document.getElementById("rangeInput").value=e.expression,updateRangeInfo(),t.innerText="Applied range to scanner input.",t.style.color="var(--status-color)"}function initSavedRangesManager(){try{const e=localStorage.getItem("minerLocator.savedRanges");if(e){const t=JSON.parse(e);Array.isArray(t)&&(savedRanges=t.filter(e=>e&&e.id&&e.title&&e.expression))}const t=localStorage.getItem("minerLocator.selectedRangeIds");if(t){const e=JSON.parse(t);Array.isArray(e)&&(selectedSavedRangeIds=e)}else{const e=localStorage.getItem("minerLocator.selectedRangeId");e&&(selectedSavedRangeIds=[e])}}catch(e){savedRanges=[],selectedSavedRangeIds=[]}selectedSavedRangeIds=selectedSavedRangeIds.filter(e=>savedRanges.some(t=>t.id===e)),renderSavedRangesList()}function persistSavedRanges(){localStorage.setItem("minerLocator.savedRanges",JSON.stringify(savedRanges)),selectedSavedRangeIds.length>0?localStorage.setItem("minerLocator.selectedRangeIds",JSON.stringify(selectedSavedRangeIds)):localStorage.removeItem("minerLocator.selectedRangeIds"),localStorage.removeItem("minerLocator.selectedRangeId")}function applySelectedRangesToScannerInput(e=!0){const t=savedRanges.filter(e=>selectedSavedRangeIds.includes(e.id)),n=t.map(e=>e.expression).join(","),a=document.getElementById("status");quickRangeOverrideActive?e&&(a.innerText="Quick IP Range override is active.",a.style.color="var(--status-color)"):n?(setQuickRangeInputValue(n),updateRangeInfo(),e&&(a.innerText=`Selected ${t.length} saved range${1===t.length?"":"s"}.`,a.style.color="var(--status-color)")):e&&(a.innerText="No saved ranges selected.",a.style.color="var(--status-color)")}function escapeHtml(e){return String(e).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;")}function saveRangeFromBuilder(){const e=document.getElementById("rangeTitleInput").value.trim(),t=getBuiltRangeExpression(),n=document.getElementById("status");if(!e)return n.innerText="Please enter a range title.",void(n.style.color="var(--error-color)");if(t.error)return n.innerText=t.error,void(n.style.color="var(--error-color)");const a=parseIPRangeInput(t.expression);if(a.error)return n.innerText=a.error,void(n.style.color="var(--error-color)");const i=totalIPsInRanges(a.ranges),r={id:Date.now().toString(36),title:e,expression:t.expression,count:i};savedRanges.unshift(r),persistSavedRanges(),renderSavedRangesList(),n.innerText=`Saved IP range: ${e}`,n.style.color="var(--success-color)"}function saveQuickRangeToSavedRanges(){const e=document.getElementById("rangeInput").value.trim(),t=document.getElementById("status");if(!e)return t.innerText="Enter a Quick IP Range first.",void(t.style.color="var(--error-color)");const n=parseIPRangeInput(e);if(n.error)return t.innerText=n.error,void(t.style.color="var(--error-color)");const a=e.replace(/\s+/g,"");if(savedRanges.some(e=>String(e.expression||"").replace(/\s+/g,"")===a))return t.innerText="This IP range is already saved.",void(t.style.color="var(--status-color)");const i="untitled",r=totalIPsInRanges(n.ranges);savedRanges.unshift({id:Date.now().toString(36),title:i,expression:e,count:r}),persistSavedRanges(),renderSavedRangesList(),t.innerText=`Saved IP range: ${i}`,t.style.color="var(--success-color)"}function clearRangeBuilderInputs(){document.getElementById("rangeTitleInput").value="",document.getElementById("directRangeInput").value="",updateRangeBuilderPreview()}function selectSavedRange(e,t){if(!t)return selectedSavedRangeIds=selectedSavedRangeIds.filter(t=>t!==e),persistSavedRanges(),renderSavedRangesList(),void applySelectedRangesToScannerInput();selectedSavedRangeIds.includes(e)||selectedSavedRangeIds.push(e),persistSavedRanges(),renderSavedRangesList(),applySelectedRangesToScannerInput()}function editSavedRange(e){const t=savedRanges.find(t=>t.id===e);if(!t)return;const n=prompt("Edit range title:",t.title);if(null===n)return;const a=n.trim();if(!a)return document.getElementById("status").innerText="Range title cannot be empty.",void(document.getElementById("status").style.color="var(--error-color)");const i=prompt("Edit IP range expression:",t.expression);if(null===i)return;const r=i.trim(),s=parseIPRangeInput(r);if(s.error)return document.getElementById("status").innerText=s.error,void(document.getElementById("status").style.color="var(--error-color)");t.title=a,t.expression=r,t.count=totalIPsInRanges(s.ranges),persistSavedRanges(),renderSavedRangesList(),selectedSavedRangeIds.includes(e)&&applySelectedRangesToScannerInput(!1),document.getElementById("status").innerText=`Updated saved range: ${t.title}`,document.getElementById("status").style.color="var(--success-color)"}function deleteSavedRange(e){savedRanges=savedRanges.filter(t=>t.id!==e),selectedSavedRangeIds=selectedSavedRangeIds.filter(t=>t!==e),persistSavedRanges(),renderSavedRangesList(),applySelectedRangesToScannerInput(!1)}function renderSavedRangesList(){const e=document.getElementById("savedRangesList");if(!e)return;const t='\n            <div class="saved-range-row saved-range-header">\n                <div>Title</div>\n                <div>IP Range</div>\n                <div></div>\n            </div>\n        ';0!==savedRanges.length?e.innerHTML=t+savedRanges.map(e=>`\n            <div class="saved-range-row">\n                <div>\n                    <div class="saved-range-title">${escapeHtml(e.title)}</div>\n                    <div class="range-inline-meta">${e.count} IP${1===e.count?"":"s"}</div>\n                </div>\n                <div class="saved-range-expression">${escapeHtml(e.expression)}</div>\n                <div class="saved-range-actions">\n                    <input type="checkbox" aria-label="Select ${escapeHtml(e.title)}" ${selectedSavedRangeIds.includes(e.id)?"checked":""} onchange="selectSavedRange('${e.id}', this.checked)">\n                    <button type="button" class="saved-action-icon" onclick="editSavedRange('${e.id}')" aria-label="Edit ${escapeHtml(e.title)}" title="Edit">\n                        <svg viewBox="0 0 24 24" aria-hidden="true">\n                            <path d="M4 20h4l10-10-4-4L4 16v4z"></path>\n                            <path d="M12 6l4 4"></path>\n                        </svg>\n                    </button>\n                    <button type="button" class="saved-action-icon" onclick="deleteSavedRange('${e.id}')" aria-label="Delete ${escapeHtml(e.title)}" title="Delete">\n                        <svg viewBox="0 0 24 24" aria-hidden="true">\n                            <path d="M3 6h18"></path>\n                            <path d="M8 6V4h8v2"></path>\n                            <path d="M19 6l-1 14H6L5 6"></path>\n                            <path d="M10 11v6"></path>\n                            <path d="M14 11v6"></path>\n                        </svg>\n                    </button>\n                </div>\n            </div>\n        `).join(""):e.innerHTML=`${t}<div class="saved-range-row"><div class="saved-range-expression">No saved IP ranges yet.</div></div>`}function initSiteMap(){try{const e=localStorage.getItem(siteMapStorageKey);if(e){const t=JSON.parse(e);Array.isArray(t.items)&&(siteMapItems=t.items.map(e=>{if(!e)return e;const t={...e};return"building"!==t.type&&"rack"!==t.type||"boolean"!=typeof t.expanded&&(t.expanded=!0),e&&"group"===e.type?{...t,type:"building",expanded:"boolean"!=typeof t.expanded||t.expanded}:t})),t.counters&&"object"==typeof t.counters&&(siteMapCounters.building=t.counters.building||t.counters.group||1,siteMapCounters.rack=t.counters.rack||1,siteMapCounters.miner=t.counters.miner||1),siteMapLayoutLocked=Boolean(t.layoutLocked),siteMapEditMode=!siteMapLayoutLocked}}catch(e){siteMapItems=[],siteMapCounters={building:1,rack:1,miner:1},siteMapLayoutLocked=!1,siteMapEditMode=!0}document.addEventListener("mousemove",onSiteMapDragMove),document.addEventListener("mousemove",onSiteMapResizeMove),document.addEventListener("mouseup",stopSiteMapDrag),document.addEventListener("mouseup",stopSiteMapResize),updateSiteMapEditControls(),renderSiteMap()}function persistSiteMap(){localStorage.setItem(siteMapStorageKey,JSON.stringify({items:siteMapItems,counters:siteMapCounters,layoutLocked:siteMapLayoutLocked}))}function isSiteMapEditable(){return siteMapEditMode}function updateSiteMapEditControls(){const e=document.getElementById("siteMapEditModeBtn"),t=document.getElementById("siteMapSaveLayoutBtn"),n=document.getElementById("siteMapAddBuildingBtn"),a=document.getElementById("siteMapAddRackBtn"),i=document.getElementById("siteMapAddMinerBtn"),r=document.getElementById("siteMapSyncBtn"),s=document.getElementById("siteMapClearBtn"),o=isSiteMapEditable();e&&(e.innerText="Edit: "+(o?"On":"Off"),e.setAttribute("aria-pressed",String(o))),t&&(t.disabled=!siteMapItems.length),n&&(n.disabled=!o),a&&(a.disabled=!o),i&&(i.disabled=!o),r&&(r.disabled=!o),s&&(s.disabled=!o)}function toggleSiteMapEditMode(){siteMapEditMode=!siteMapEditMode,updateSiteMapEditControls(),updateSiteMapContextHint(),renderSiteMap()}function saveSiteMapLayout(){siteMapLayoutLocked=!0,siteMapEditMode=!1,persistSiteMap(),updateSiteMapEditControls(),updateSiteMapContextHint("Layout saved and locked. Enable Edit Mode to make changes."),renderSiteMap()}function getSiteMapItem(e){return siteMapItems.find(t=>t.id===e)||null}function getSiteMapChildren(e){return siteMapItems.filter(t=>t.parentId===e)}function isSiteMapItemVisible(e){if(!e.parentId)return!0;const t=getSiteMapItem(e.parentId);return!t||!1!==t.expanded&&isSiteMapItemVisible(t)}function getSiteMapNodeSize(e){return"building"===e?{width:340,height:220}:"rack"===e?{width:210,height:120}:{width:160,height:74}}function getSiteMapNodeDimensions(e){const t=getSiteMapNodeSize(e.type);return{width:e.width||t.width,height:e.height||t.height}}function clamp(e,t,n){return Math.min(n,Math.max(t,e))}function getConstrainedPosition(e,t,n){const a=document.getElementById("siteMapCanvas");if(!a)return{x:t,y:n};const i=getSiteMapNodeDimensions(e);if(!e.parentId)return{x:clamp(t,4,Math.max(4,a.clientWidth-i.width-4)),y:clamp(n,4,Math.max(4,a.clientHeight-i.height-4))};const r=getSiteMapItem(e.parentId);if(!r)return{x:clamp(t,4,Math.max(4,a.clientWidth-i.width-4)),y:clamp(n,4,Math.max(4,a.clientHeight-i.height-4))};const s=getSiteMapNodeDimensions(r),o=r.x+10,d=r.y+34,l=r.x+s.width-i.width-10,c=r.y+s.height-i.height-10;return{x:clamp(t,o,Math.max(o,l)),y:clamp(n,d,Math.max(d,c))}}function collectDescendantIds(e){const t=[],n=[e];for(;n.length;){const e=n.shift();siteMapItems.filter(t=>t.parentId===e).forEach(e=>{t.push(e.id),n.push(e.id)})}return t}function getSelectedBuilding(){const e=getSiteMapItem(selectedSiteMapItemId);if(e&&"building"===e.type)return e;if(e&&"rack"===e.type)return getSiteMapItem(e.parentId);if(e&&"miner"===e.type){const t=getSiteMapItem(e.parentId);return t?getSiteMapItem(t.parentId):null}return null}function getSelectedRack(){const e=getSiteMapItem(selectedSiteMapItemId);return e&&"rack"===e.type?e:e&&"miner"===e.type?getSiteMapItem(e.parentId):null}function toggleSiteMapExpand(e){const t=getSiteMapItem(e);if(!t||!["building","rack"].includes(t.type))return;const n=!1===t.expanded;if(t.expanded=n,n&&"building"===t.type&&siteMapItems.forEach(e=>{e.id!==t.id&&"building"===e.type&&(e.expanded=!1)}),n&&"rack"===t.type&&siteMapItems.forEach(e=>{e.id!==t.id&&"rack"===e.type&&e.parentId===t.parentId&&(e.expanded=!1)}),!1===t.expanded&&selectedSiteMapItemId){let e=getSiteMapItem(selectedSiteMapItemId);for(;e;){if(e.id===t.id){selectedSiteMapItemId=t.id;break}e=e.parentId?getSiteMapItem(e.parentId):null}}persistSiteMap(),renderSiteMap()}function addSiteMapItem(e){if(!isSiteMapEditable())return void updateSiteMapContextHint("Layout is locked. Enable Edit Mode to add items.");if(!document.getElementById("siteMapCanvas"))return;let t=null,n="B",a=20+siteMapItems.length%6*24,i=20+siteMapItems.length%6*24;if("rack"===e){const e=getSelectedBuilding();if(!e)return void updateSiteMapContextHint("Select a building before adding a rack.");t=e.id,n="R";const r=getSiteMapChildren(e.id).filter(e=>"rack"===e.type);a=e.x+12+r.length%2*110,i=e.y+42+62*Math.floor(r.length/2)}else if("miner"===e){const e=getSelectedRack();if(!e)return void updateSiteMapContextHint("Select a rack before adding a miner.");t=e.id,n="M";const r=getSiteMapChildren(e.id).filter(e=>"miner"===e.type);a=e.x+10+r.length%2*76,i=e.y+42+34*Math.floor(r.length/2)}else e="building",n="B";const r=`${n} ${siteMapCounters[e]||1}`;siteMapCounters[e]=(siteMapCounters[e]||1)+1;const s={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),type:e,title:r,status:"online",parentId:t,x:a,y:i};"building"!==e&&"rack"!==e||(s.expanded=!0),"building"===e&&siteMapItems.forEach(e=>{"building"===e.type&&(e.expanded=!1)}),"rack"===e&&t&&siteMapItems.forEach(e=>{"rack"===e.type&&e.parentId===t&&(e.expanded=!1)});const o=getSiteMapNodeSize(e);s.width=o.width,s.height=o.height;const d=getConstrainedPosition(s,a,i);s.x=d.x,s.y=d.y,siteMapItems.push(s),selectedSiteMapItemId=s.id,persistSiteMap(),renderSiteMap()}function clearSiteMap(){isSiteMapEditable()?(siteMapItems=[],selectedSiteMapItemId=null,persistSiteMap(),updateSiteMapEditControls(),renderSiteMap()):updateSiteMapContextHint("Layout is locked. Enable Edit Mode to clear.")}function deleteSiteMapItem(e){if(!isSiteMapEditable())return void updateSiteMapContextHint("Layout is locked. Enable Edit Mode to delete.");const t=new Set([e,...collectDescendantIds(e)]);siteMapItems=siteMapItems.filter(e=>!t.has(e.id)),t.has(selectedSiteMapItemId)&&(selectedSiteMapItemId=null),persistSiteMap(),updateSiteMapEditControls(),renderSiteMap()}function renameSiteMapItem(e){if(!isSiteMapEditable())return void updateSiteMapContextHint("Layout is locked. Enable Edit Mode to rename.");const t=siteMapItems.find(t=>t.id===e);if(!t)return;const n=prompt("Rename tile:",t.title);if(null===n)return;const a=n.trim();a&&(t.title=a,persistSiteMap(),renderSiteMap())}function beginSiteMapDrag(e,t){if(!isSiteMapEditable())return;if(e.target.closest(".site-node-delete"))return;if(e.target.closest(".site-node-resize-handle"))return;if(e.target.closest(".site-node-toggle"))return;const n=siteMapItems.find(e=>e.id===t);n&&(selectedSiteMapItemId=n.id,activeSiteMapDrag={itemId:t,startX:e.clientX,startY:e.clientY,originX:n.x,originY:n.y,childOrigins:collectDescendantIds(n.id).map(e=>{const t=getSiteMapItem(e);return t?{id:t.id,x:t.x,y:t.y}:null}).filter(Boolean)},document.body.style.cursor="grabbing",e.preventDefault(),renderSiteMap())}function beginSiteMapResize(e,t){if(!isSiteMapEditable())return;const n=getSiteMapItem(t);if(!n||!["building","rack"].includes(n.type))return;const a=getSiteMapNodeDimensions(n);activeSiteMapResize={itemId:t,startX:e.clientX,startY:e.clientY,startWidth:a.width,startHeight:a.height},document.body.style.cursor="nwse-resize",e.preventDefault(),e.stopPropagation()}function onSiteMapResizeMove(e){if(!activeSiteMapResize)return;const t=getSiteMapItem(activeSiteMapResize.itemId);if(!t)return;const n=e.clientX-activeSiteMapResize.startX,a=e.clientY-activeSiteMapResize.startY;let i=activeSiteMapResize.startWidth+n,r=activeSiteMapResize.startHeight+a;"building"===t.type?(i=clamp(i,260,560),r=clamp(r,170,460)):(i=clamp(i,170,320),r=clamp(r,96,260)),t.width=i,t.height=r;const s=getConstrainedPosition(t,t.x,t.y);t.x=s.x,t.y=s.y;collectDescendantIds(t.id).forEach(e=>{const t=getSiteMapItem(e);if(!t)return;const n=getConstrainedPosition(t,t.x,t.y);t.x=n.x,t.y=n.y}),renderSiteMap()}function stopSiteMapResize(){activeSiteMapResize&&(activeSiteMapResize=null,document.body.style.cursor="",persistSiteMap())}function onSiteMapDragMove(e){if(!activeSiteMapDrag)return;const t=document.getElementById("siteMapCanvas"),n=document.querySelector(`[data-site-node-id="${activeSiteMapDrag.itemId}"]`),a=siteMapItems.find(e=>e.id===activeSiteMapDrag.itemId);if(!t||!n||!a)return;const i=e.clientX-activeSiteMapDrag.startX,r=e.clientY-activeSiteMapDrag.startY,s=getConstrainedPosition(a,activeSiteMapDrag.originX+i,activeSiteMapDrag.originY+r),o=s.x-a.x,d=s.y-a.y;a.x=s.x,a.y=s.y,n.style.left=`${a.x}px`,n.style.top=`${a.y}px`,activeSiteMapDrag.childOrigins.forEach(e=>{const t=getSiteMapItem(e.id);if(!t)return;const n=getConstrainedPosition(t,e.x+o,e.y+d);t.x=n.x,t.y=n.y;const a=document.querySelector(`[data-site-node-id="${t.id}"]`);a&&(a.style.left=`${t.x}px`,a.style.top=`${t.y}px`)})}function stopSiteMapDrag(){activeSiteMapDrag&&(activeSiteMapDrag=null,document.body.style.cursor="",persistSiteMap(),renderSiteMap())}function syncSiteMapFromMiners(){if(!isSiteMapEditable())return void updateSiteMapContextHint("Layout is locked. Enable Edit Mode to sync.");if(!minersData.length)return void updateSiteMapContextHint("No scanned miners");const e={};minersData.forEach(t=>{const n=String(t.ip||"").split(".");if(4!==n.length)return;const a=`${n[0]}.${n[1]}.${n[2]}.x`;e[a]||(e[a]=[]),e[a].push(t)}),siteMapItems=siteMapItems.filter(e=>"scan-sync"!==e.source);const t=`sync-building-${Date.now().toString(36)}`,n={id:t,type:"building",title:"B-Auto",status:"online",x:24,y:24,width:380,height:240,expanded:!0,source:"scan-sync"};siteMapItems.push(n);Object.keys(e).sort().forEach((n,a)=>{const i=`sync-rack-${Date.now().toString(36)}-${a}`,r=a%3,s=Math.floor(a/3),o={id:i,type:"rack",title:`R-${n}`,status:"online",parentId:t,x:36+104*r,y:72+62*s,width:210,height:120,expanded:!1,source:"scan-sync"};siteMapItems.push(o),e[n].slice(0,4).forEach((e,t)=>{siteMapItems.push({id:`sync-miner-${Date.now().toString(36)}-${a}-${t}`,type:"miner",title:e.hostname&&"N/A"!==e.hostname?e.hostname:`M-${e.ip}`,status:"online",parentId:i,x:o.x+10+t%2*78,y:o.y+42+30*Math.floor(t/2),width:160,height:74,source:"scan-sync"})})}),selectedSiteMapItemId=t,persistSiteMap(),updateSiteMapEditControls(),renderSiteMap()}function updateSiteMapContextHint(e){const t=document.getElementById("siteMapContextHint");if(!t)return;if(e)return void(t.innerText=e);const n=getSiteMapItem(selectedSiteMapItemId);isSiteMapEditable()?n?"building"!==n.type?"rack"!==n.type?t.innerText=`Miner ${n.title}`:t.innerText=`Rack ${n.title}`:t.innerText=`Building ${n.title}`:t.innerText="Pick a tile":t.innerText=siteMapLayoutLocked?"Locked":"Edit off"}function renderSiteMap(){const e=document.getElementById("siteMapCanvas");if(!e)return;if(!siteMapItems.length)return e.innerHTML='<div class="site-map-empty">No layout</div>',updateSiteMapEditControls(),void updateSiteMapContextHint();e.innerHTML="";const t={building:1,rack:2,miner:3};[...siteMapItems].filter(e=>isSiteMapItemVisible(e)).sort((e,n)=>(t[e.type]||99)-(t[n.type]||99)).forEach(t=>{const n=document.createElement("div");n.className=`site-node site-node-${t.type}${"offline"===t.status?" site-node-offline":""}`,t.id===selectedSiteMapItemId&&(n.className+=" site-node-selected"),isSiteMapEditable()&&(n.className+=" site-node-editable"),n.setAttribute("data-site-node-id",t.id),n.style.left=`${t.x}px`,n.style.top=`${t.y}px`;const a=getSiteMapNodeDimensions(t);n.style.width=`${a.width}px`,n.style.height=`${a.height}px`;const i="building"===t.type||"rack"===t.type,r=!1===t.expanded?"&#9654;":"&#9660;";n.innerHTML=`\n                <div class="site-node-header">\n                    ${i?`<button type="button" class="site-node-toggle" title="${!1===t.expanded?"Expand":"Collapse"}" aria-label="${!1===t.expanded?"Expand":"Collapse"}" onclick="toggleSiteMapExpand('${t.id}'); event.stopPropagation();">${r}</button>`:'<span style="width:20px;display:inline-block;"></span>'}\n                    <span class="site-node-title" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>\n                    ${isSiteMapEditable()?`<button type="button" class="site-node-delete" title="Delete tile" aria-label="Delete tile" onclick="deleteSiteMapItem('${t.id}')">x</button>`:'<span style="width:20px;display:inline-block;"></span>'}\n                </div>\n                ${!isSiteMapEditable()||"building"!==t.type&&"rack"!==t.type?"":`<div class="site-node-resize-handle" onmousedown="beginSiteMapResize(event, '${t.id}')" title="Resize"></div>`}\n            `,isSiteMapEditable()&&(n.onmousedown=e=>beginSiteMapDrag(e,t.id),n.ondblclick=()=>renameSiteMapItem(t.id)),n.onclick=()=>{selectedSiteMapItemId=t.id,updateSiteMapContextHint(),renderSiteMap()},e.appendChild(n)}),updateSiteMapEditControls(),updateSiteMapContextHint()}function parseIPRangeInput(e){if(!e||!e.trim())return{error:"Empty range"};const t=e.split(",").map(e=>e.trim()).filter(Boolean),n=[];for(const e of t){if(e.includes("/")){const[t,a]=e.split("/"),i=parseInt(a,10);if(!t||isNaN(i)||i<0||i>32)return{error:`Invalid CIDR: ${e}`};const r=0===i?0:4294967295<<32-i>>>0,s=ipToNum(t)&r,o=s|~r>>>0;n.push({start:s>>>0,end:o>>>0});continue}if(e.includes("-")){const[t,a]=e.split("-").map(e=>e.trim());if(!t||!a)return{error:`Invalid range: ${e}`};const i=ipToNum(t),r=ipToNum(a);if(isNaN(i)||isNaN(r))return{error:`Invalid range entry: ${e}`};if(i>r)return{error:`Start > end in range: ${e}`};n.push({start:i,end:r});continue}const t=ipToNum(e);if(isNaN(t))return{error:`Invalid entry: ${e}`};n.push({start:t,end:t})}return{ranges:n}}function totalIPsInRanges(e){return e.reduce((e,t)=>e+(t.end-t.start+1),0)}function updateRangeInfo(){const e=document.getElementById("rangeInput").value,t=document.getElementById("scanBtn"),n=document.getElementById("saveQuickRangeBtn");if(!e||!e.trim())return t.disabled=!0,void(n&&(n.disabled=!0));const a=parseIPRangeInput(e);if(a.error)return t.disabled=!0,void(n&&(n.disabled=!0));n&&(n.disabled=!1);totalIPsInRanges(a.ranges)>65536?t.disabled=!0:t.disabled=!1}function setSortDirection(e,t){isDraggingHeader||(sortCol=e,sortAsc=t,renderHeaders(),renderTable())}function loadTestData(){const e=document.getElementById("status");eventSource&&(eventSource.close(),eventSource=null);const t=document.getElementById("scanBtn");t.disabled=!1,t.innerText="Scan Network",minersData=[{ip:"10.10.1.14",status:"online",hashrate:"134.72",temp:"68",hostname:"antminer-01",mac:"A4:56:02:3C:11:0A",os:"AntMiner",minerType:"Antminer S19 Pro",cbType:"BM1362",hashboards:"3/3",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.1.15",status:"online",hashrate:"110.05",temp:"71",hostname:"antminer-02",mac:"A4:56:02:3C:11:0B",os:"AntMiner",minerType:"Antminer S19",cbType:"BM1362",hashboards:"3/3",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.2.8",status:"online",hashrate:"198.44",temp:"65",hostname:"whatsminer-01",mac:"B0:19:C6:7A:22:FF",os:"WhatsMiner",minerType:"WhatsMiner M50S",cbType:"SJ346",hashboards:"4/4",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.2.9",status:"online",hashrate:"201.10",temp:"63",hostname:"whatsminer-02",mac:"B0:19:C6:7A:22:FE",os:"WhatsMiner",minerType:"WhatsMiner M50S",cbType:"SJ346",hashboards:"4/4",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.3.22",status:"online",hashrate:"84.00",temp:"74",hostname:"antminer-03",mac:"A4:56:02:3C:22:1C",os:"AntMiner",minerType:"Antminer S17 Pro",cbType:"BM1397",hashboards:"3/3",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.3.23",status:"online",hashrate:"56.33",temp:"79",hostname:"antminer-04",mac:"A4:56:02:3C:22:1D",os:"AntMiner",minerType:"Antminer T17+",cbType:"BM1397",hashboards:"2/3",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.4.5",status:"online",hashrate:"335.00",temp:"60",hostname:"antminer-05",mac:"A4:56:02:4D:33:AA",os:"AntMiner",minerType:"Antminer S21 Pro",cbType:"BM1368",hashboards:"4/4",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.4.6",status:"online",hashrate:"329.88",temp:"61",hostname:"antminer-06",mac:"A4:56:02:4D:33:AB",os:"AntMiner",minerType:"Antminer S21 Pro",cbType:"BM1368",hashboards:"4/4",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.5.11",status:"online",hashrate:"145.00",temp:"70",hostname:"avalon-01",mac:"C4:7F:51:9B:44:BC",os:"cgminer",minerType:"Avalon 1246",cbType:"A3206",hashboards:"3/3",pools:"stratum+tcp://pool.example.com:3333"},{ip:"10.10.5.12",status:"online",hashrate:"0.00",temp:"N/A",hostname:"avalon-02",mac:"C4:7F:51:9B:44:BD",os:"cgminer",minerType:"Avalon 1246",cbType:"A3206",hashboards:"0/3",pools:"N/A"}],e.innerText=`Done. Total: ${minersData.length}`,e.style.color="var(--success-color)",renderTable()}function startScan(){const e=document.getElementById("rangeInput").value,t=parseIPRangeInput(e);if(t.error){const e=document.getElementById("status");return e.innerText=`Invalid range: ${t.error}`,void(e.style.color="var(--error-color)")}const n=document.getElementById("scanBtn"),a=document.getElementById("status");eventSource&&eventSource.close(),n.disabled=!0,n.innerText="Scanning...",minersData=[],renderTable(),a.innerText="Found 0.",a.style.color="var(--status-color)",eventSource=new EventSource(`/api/scan?range=${encodeURIComponent(e)}`),eventSource.onmessage=function(e){const t=JSON.parse(e.data),n=t.data.SUMMARY&&t.data.SUMMARY[0]?t.data.SUMMARY[0]:{};let i=0;n["GHS 5s"]?i=(parseFloat(n["GHS 5s"])/1e3).toFixed(2):n["GHS av"]&&(i=(parseFloat(n["GHS av"])/1e3).toFixed(2)),minersData.push({ip:t.ip,status:"online",hashrate:i,temp:"N/A",hostname:"N/A",mac:"N/A",os:"N/A",minerType:"N/A",cbType:"N/A",hashboards:"N/A",pools:"N/A"}),a.innerText=`Found ${minersData.length}.`,renderTable()},eventSource.addEventListener("done",function(){eventSource.close(),n.disabled=!1,n.innerText="Scan Network",a.innerText=`Done. Total: ${minersData.length}`,a.style.color="var(--success-color)"}),eventSource.onerror=function(){eventSource.close(),n.disabled=!1,n.innerText="Scan Network",a.innerText="Connection lost.",a.style.color="var(--error-color)"}}window.onload=()=>{renderHeaders(),renderTable(),updateColumnDragButton();document.getElementById("rangeInput").addEventListener("input",()=>handleQuickRangeInput()),updateRangeInfo(),initSavedRangesManager(),updateRangeBuilderPreview()};</script>
+
+</body>
+</html>
