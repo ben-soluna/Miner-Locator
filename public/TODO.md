@@ -45,11 +45,16 @@
 - [ ] Add a Settings control to resize the sidebar width
 - [ ] Create a site map view
 
-## Backend (Next Steps)
-- [ ] Upgrade `server.js` to send the `stats` command to port 4028.
-- [ ] Parse the `stats` data to get **Hardware Temps**, **Miner Type**, and **Active Hashboards**.
-- [ ] Upgrade `server.js` to send the `pools` command to get **Pool** data.
-- [ ] Investigate using SSH or HTTP requests to pull **MAC Address**, **OS**, and **Hostname** (since port 4028 doesn't provide these).
+## Backend
+- [x] Upgrade `server.js` to send the `stats` command to port 4028.
+- [x] Parse the `stats` data to get **Hardware Temps**, **Miner Type**, and **Active Hashboards**.
+- [x] Upgrade `server.js` to send the `pools` command to get **Pool** data.
+- [x] Add lightweight fallback enrichment for **MAC Address**, **OS**, and **Hostname** (ARP cache + reverse DNS + best-effort HTTP hints).
+- [x] Implement CGMiner joined-command queries (`summary+stats+pools+version+devs`) to reduce per-host TCP round-trips from 5 to 1.
+- [x] Add `requestMinerCommands()` helper with join + per-command fallback for older firmware.
+- [x] Defer `devdetails` / `edevs` / `config` to a conditional extra pass (only when fields are still missing after base pass).
+- [x] Add `MINER_API_TIMEOUT_MS` env variable (default 1200 ms, min 200 ms).
+- [x] Add `client.setNoDelay(true)` to reduce TCP Nagle latency on miner connections.
 
 ## Other
-- [] //TODO function and VS Code Extensions
+- [ ] //TODO function and VS Code Extensions
