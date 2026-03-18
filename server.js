@@ -1,10 +1,11 @@
+// Version: 0.2.1
 const express = require('express');
 const net = require('net');
 const path = require('path');
 const dns = require('dns').promises;
 const fs = require('fs');
 const http = require('http');
-const { execFile, exec } = require('child_process');
+const { execFile } = require('child_process');
 
 const app = express();
 const PORT = 3000;
@@ -15,9 +16,16 @@ const PER_HOST_COMMAND_CONCURRENCY = Math.max(1, parseInt(process.env.PER_HOST_C
 const MINER_API_TIMEOUT_MS = Math.max(200, parseInt(process.env.MINER_API_TIMEOUT_MS || '1200', 10) || 1200);
 const MIN_SCAN_CONCURRENCY = 1;
 const MAX_SCAN_CONCURRENCY = 128;
+const GLOBAL_CHECK_CONCURRENCY = Math.max(1, parseInt(process.env.GLOBAL_CHECK_CONCURRENCY || '96', 10) || 96);
+const ARP_CACHE_TTL_MS = Math.max(200, parseInt(process.env.ARP_CACHE_TTL_MS || '1500', 10) || 1500);
+const AUTO_OPEN_BROWSER = !['0', 'false', 'no', 'off'].includes(String(process.env.AUTO_OPEN_BROWSER || '1').trim().toLowerCase());
 
 let activeHttpFallback = 0;
 const httpFallbackQueue = [];
+let activeGlobalChecks = 0;
+const globalCheckQueue = [];
+let arpCacheByIp = null;
+let arpCacheUpdatedAt = 0;
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -226,7 +234,33 @@ function withTimeout(promise, ms, fallback = null) {
     });
 }
 
-function readMacFromSystem(ip) {
+async function readLinuxArpCacheByIp() {
+    const now = Date.now();
+    if (arpCacheByIp && (now - arpCacheUpdatedAt) <= ARP_CACHE_TTL_MS) {
+        return arpCacheByIp;
+    }
+
+    try {
+        const arp = await fs.promises.readFile('/proc/net/arp', 'utf8');
+        const map = new Map();
+        for (const line of arp.split('\n').slice(1)) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 4) continue;
+            const ip = String(parts[0] || '').trim();
+            const mac = String(parts[3] || '').trim().toUpperCase();
+            if (!ip || !mac || mac === '00:00:00:00:00:00') continue;
+            map.set(ip, mac);
+        }
+
+        arpCacheByIp = map;
+        arpCacheUpdatedAt = now;
+        return arpCacheByIp;
+    } catch (_err) {
+        return null;
+    }
+}
+
+async function readMacFromSystem(ip) {
     // Windows: use arp -a
     if (process.platform === 'win32') {
         return new Promise((resolve) => {
@@ -239,16 +273,10 @@ function readMacFromSystem(ip) {
     }
 
     // Linux: read directly from kernel ARP table — no subprocess needed
-    try {
-        const arp = fs.readFileSync('/proc/net/arp', 'utf8');
-        for (const line of arp.split('\n').slice(1)) {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length >= 4 && parts[0] === ip) {
-                const mac = String(parts[3]).toUpperCase();
-                if (mac && mac !== '00:00:00:00:00:00') return Promise.resolve(mac);
-            }
-        }
-    } catch (_err) {}
+    const arpMap = await readLinuxArpCacheByIp();
+    if (arpMap && arpMap.has(ip)) {
+        return arpMap.get(ip);
+    }
 
     // Fallback: ip neigh (handles container environments where /proc/net/arp may be absent)
     return new Promise((resolve) => {
@@ -257,6 +285,29 @@ function readMacFromSystem(ip) {
             const match = String(stdout).match(/lladdr\s+([0-9a-f:]{17})/i);
             resolve(match ? match[1].toUpperCase() : 'N/A');
         });
+    });
+}
+
+function runGlobalCheckTask(task) {
+    return new Promise((resolve) => {
+        const execute = async () => {
+            activeGlobalChecks += 1;
+            try {
+                resolve(await task());
+            } catch (_err) {
+                resolve(null);
+            } finally {
+                activeGlobalChecks -= 1;
+                const next = globalCheckQueue.shift();
+                if (next) next();
+            }
+        };
+
+        if (activeGlobalChecks < GLOBAL_CHECK_CONCURRENCY) {
+            execute();
+        } else {
+            globalCheckQueue.push(execute);
+        }
     });
 }
 
@@ -980,11 +1031,16 @@ async function runWithConcurrency(items, limit, worker) {
     await Promise.all(runners);
 }
 
-// DEBUG ENDPOINT — queries every command against a single IP and returns raw payloads
+// DEBUG ENDPOINT — always enabled in normal local runtime; queries every command
+// against a single IP and returns raw payloads.
 // plus a flat list of every key/value seen across all responses.
 // Usage: GET /api/debug/192.168.1.5
 app.get('/api/debug/:ip', async (req, res) => {
     const ip = req.params.ip;
+    if (Number.isNaN(ipToInt(ip))) {
+        return res.status(400).json({ error: 'Invalid IP address.' });
+    }
+
     const commands = ['summary', 'stats', 'pools', 'devs', 'version', 'devdetails', 'edevs', 'config'];
     const payloads = {};
     for (const cmd of commands) {
@@ -1049,9 +1105,9 @@ app.get('/api/scan', async (req, res) => {
     await runWithConcurrency(targets, scanConcurrency, async (ipStr) => {
         if (aborted) return;
 
-        const result = await checkMinerDetailed(ipStr);
+        const result = await runGlobalCheckTask(() => checkMinerDetailed(ipStr));
         if (aborted) return;
-        if (result.status === 'online') {
+        if (result && result.status === 'online') {
             foundCount++;
             res.write(`data: ${JSON.stringify(result)}\n\n`);
         }
@@ -1066,8 +1122,19 @@ app.get('/api/scan', async (req, res) => {
 // CHANGED: The console message now matches the official name!
 app.listen(PORT, () => {
     const url = `http://localhost:${PORT}`;
-    console.log(`The Miner Finder is running! Opening ${url} ...`);
-    if (process.platform === 'win32') exec(`start ${url}`);
-    else if (process.platform === 'darwin') exec(`open ${url}`);
-    else exec(`xdg-open ${url}`);
+    console.log(`Miner-Finder is running! Opening ${url} ...`);
+
+    if (!AUTO_OPEN_BROWSER) {
+        console.log('AUTO_OPEN_BROWSER is disabled; not launching a browser.');
+        return;
+    }
+
+    // Best-effort browser launch only; failures should not affect server startup.
+    if (process.platform === 'win32') {
+        execFile('cmd', ['/c', 'start', '', url], () => {});
+    } else if (process.platform === 'darwin') {
+        execFile('open', [url], () => {});
+    } else {
+        execFile('xdg-open', [url], () => {});
+    }
 });

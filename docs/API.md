@@ -1,3 +1,4 @@
+<!-- Version: 0.2.1 -->
 # API Documentation
 
 Last updated: 2026-03-17 (session 2)
@@ -99,13 +100,13 @@ Completion event:
 
 ### Notes on Scan Behavior
 
-- Scanner probes miner API port `4028`.
+- Miner-Finder probes miner API port `4028`.
 - Per online miner, a **single joined CGMiner request** is sent for `summary+stats+pools+version+devs` (one TCP round-trip per host).
 - `devdetails`, `edevs`, and `config` are fetched in a second pass only when miner fields are still missing after the base pass.
 - If the firmware does not support joined commands, the helper falls back to requesting each command individually.
 - Socket timeout is controlled by the `MINER_API_TIMEOUT_MS` env variable (default `1200` ms, min `200` ms).
 - `client.setNoDelay(true)` is set on every connection to reduce TCP Nagle latency.
-- Scanner uses bounded worker concurrency (default `48`, env `SCAN_CONCURRENCY`) to avoid large burst traffic on switches.
+- Miner-Finder uses bounded worker concurrency (default `48`, env `SCAN_CONCURRENCY`) to avoid large burst traffic on switches.
 - Targets ending in `.0` and `.255` are skipped.
 - If the client disconnects, server marks scan as aborted and stops writing SSE events.
 

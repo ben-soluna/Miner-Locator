@@ -1,9 +1,10 @@
 <!DOCTYPE html>
+<!-- Version: 0.2.1 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Miner Locator</title>
+    <title>Miner-Finder</title>
     <style>
         /* --- CSS Variables & Resets --- */
         :root {
@@ -65,6 +66,7 @@
             display: flex;
             flex-direction: column;
             overflow: visible;
+            z-index: 10;
         }
         .sidebar-header {
             display: none;
@@ -94,7 +96,6 @@
             gap: 10px;
             min-height: 48px;
             border-bottom: 1px solid var(--table-border);
-            overflow: hidden;
             transition: background 0.2s ease, color 0.2s ease;
             white-space: nowrap;
             position: relative;
@@ -128,21 +129,41 @@
         }
         .menu-item.active .menu-icon { color: var(--text-color); }
         .menu-item .menu-label {
-            display: inline-block;
+            position: absolute;
+            left: calc(100% + 8px);
+            top: 50%;
+            transform: translateY(-50%) translateX(-4px);
+            background: #1a1f2b;
+            color: #f0f4ff;
+            border: 1px solid #111;
+            border-radius: 6px;
+            padding: 7px 14px;
+            white-space: nowrap;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.45);
             opacity: 0;
-            transform: translateX(-4px);
-            transition: opacity 0.15s ease, transform 0.15s ease;
             pointer-events: none;
-            flex-shrink: 0;
+            z-index: 200;
+            transition: opacity 0.15s ease, transform 0.15s ease;
         }
         .menu-item:hover .menu-label {
             opacity: 1;
-            transform: translateX(0);
+            transform: translateY(-50%) translateX(0);
         }
-        /* Show labels when sidebar is wide enough (> 100px) */
+        /* Show labels inline when sidebar is wide enough (> 100px) */
         body.sidebar-expanded .menu-item .menu-label {
+            position: static;
+            background: transparent;
+            border: none;
+            padding: 0;
+            box-shadow: none;
             opacity: 1;
-            transform: translateX(0);
+            pointer-events: auto;
+            transform: none;
+            transition: none;
+            flex-shrink: 0;
         }
         /* Footer area inside sidebar */
         .sidebar-bottom {
@@ -485,6 +506,20 @@
             background: #ea580c;
             border-color: #ea580c;
             color: var(--primary-text);
+        }
+        .flag-toggle-btn.pending-remove {
+            background: #b91c1c;
+            border-color: #b91c1c;
+            color: #fff;
+        }
+        .flag-toggle-btn.pending-remove:hover {
+            background: #991b1b;
+            border-color: #991b1b;
+            color: #fff;
+        }
+        .flag-toggle-btn.home-locked,
+        .flag-toggle-btn.home-locked:hover {
+            cursor: not-allowed;
         }
         .flag-action-cell,
         .header-action-cell {
@@ -884,7 +919,7 @@
                 </span>
                 <span class="menu-label">Settings</span>
             </button>
-            <div class="sidebar-version">v1.0.1</div>
+            <div class="sidebar-version">v0.2.1</div>
         </div>
     </aside>
 
@@ -893,7 +928,7 @@
         <!-- Dashboard view: scan controls + miner table -->
         <section id="dashboardView" class="view-panel active">
             <div class="container">
-                <h2 class="app-title">The Miner Locator</h2>
+                <h2 class="app-title">Miner-Finder</h2>
                 
                 <div class="controls">
                     <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
@@ -905,13 +940,15 @@
                         <button onclick="startScan()" id="scanBtn">Scan Network</button>
                         <button class="secondary" onclick="stopScan()" id="stopScanBtn" disabled>Stop Scan</button>
                         <button class="secondary" onclick="loadTestData()" id="testBtn">Load Test Data</button>
+                        <button class="secondary" type="button" onclick="clearMinerTable()" id="clearTableBtn">Clear Table</button>
                         <span id="status">Ready.</span>
+                        <span id="lastUpdatedDisplay" style="font-weight: 600; font-size: 13px; color: var(--status-color);">Last updated: --</span>
                     </div>
                 </div>
 
                 <div class="table-tools">
                     <div class="column-toolbox" aria-label="Column tools">
-                        <button class="column-tool-label" type="button" onclick="openModal()" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
+                        <button class="column-tool-label" type="button" onclick="openModal('dashboardView')" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
                     </div>
                     <button id="editModeToggleBtn" class="edit-mode-toggle" type="button" onclick="toggleEditMode()" title="Toggle edit mode for sidebar and columns" aria-label="Toggle edit mode">Edit Mode</button>
                 </div>
@@ -961,7 +998,7 @@
 
                 <div class="table-tools">
                     <div class="column-toolbox" aria-label="Column tools">
-                        <button class="column-tool-label" type="button" onclick="openModal()" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
+                        <button class="column-tool-label" type="button" onclick="openModal('flaggedMinersView')" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
                     </div>
                     <button id="flaggedEditModeToggleBtn" class="edit-mode-toggle" type="button" onclick="toggleEditMode()" title="Toggle edit mode for sidebar and columns" aria-label="Toggle edit mode">Edit Mode</button>
                 </div>
@@ -996,7 +1033,9 @@
                 <p id="scanConcurrencyHint" style="margin: 8px 0 0; color: var(--status-color); font-size: 13px;">Higher is faster but can increase network load.</p>
                 <div class="range-actions" style="margin-top: 10px;">
                     <button type="button" class="secondary" onclick="resetScanConcurrencySetting()">Reset to Default</button>
+                    <button type="button" class="secondary" onclick="clearCachedMinerData()">Clear Cached Miner Data</button>
                 </div>
+                <p id="minerCacheStatus" style="margin: 8px 0 0; color: var(--status-color); font-size: 13px;">Cache status: No cached miner data.</p>
             </div>
         </section>
     </main>
@@ -1035,12 +1074,13 @@
     // Used to prevent sorting when finishing a drag
     let isDraggingHeader = false; 
     let draggedHeaderId = null;
+    let draggedHeaderViewId = null;
     let headerDropTarget = null;
     const headerSnapZonePx = 18;
     const headerSnapZoneRatio = 0.24;
 
-    // Master column configuration for table + modal
-    let columns = [
+    // Per-view column configuration for table + modal
+    const defaultColumns = [
         { id: 'ip', label: 'IP Address', visible: true },
         { id: 'status', label: 'Status', visible: true },
         { id: 'hostname', label: 'Hostname', visible: true },
@@ -1059,14 +1099,20 @@
         { id: 'hashrate', label: 'Hashrate (TH/s)', visible: true },
         { id: 'activeHashboards', label: 'Active Boards', visible: false },
         { id: 'hashboards', label: 'Hashboards', visible: true },
-        { id: 'pools', label: 'Pools', visible: true }
+        { id: 'pools', label: 'Pools', visible: true },
+        { id: 'flag', label: 'Flag', visible: true, lockVisible: true }
     ];
 
+    let homeColumns = JSON.parse(JSON.stringify(defaultColumns));
+    let flaggedColumns = JSON.parse(JSON.stringify(defaultColumns));
+
     let pendingColumns = []; 
+    let pendingColumnsViewId = 'dashboardView';
     let dragStartIndex = -1;
     let savedRanges = [];
     let selectedSavedRangeIds = [];
     let flaggedMinerIps = [];
+    let pendingFlaggedRemovalIps = [];
     let quickRangeOverrideActive = false;
     let suppressQuickRangeInputHandler = false;
     let siteMapItems = [];
@@ -1082,11 +1128,19 @@
     const minScanConcurrency = 1;
     const maxScanConcurrency = 128;
     const flaggedMinerStorageKey = 'minerLocator.flaggedMinerIps';
+    const minerDataStorageKey = 'minerLocator.cachedMinersData';
+    const minerDataUpdatedAtStorageKey = 'minerLocator.cachedMinersDataUpdatedAt';
+    const cachePersistDebounceMs = 250;
     let scanConcurrency = defaultScanConcurrency;
+    let minerDataLastUpdatedAt = null;
+    let scanRenderRafId = null;
+    let cachePersistTimerId = null;
 
     // Initial render on page load
     window.onload = () => {
         initFlaggedMiners();
+        initCachedMinerData();
+        updateMinerCacheStatus();
         renderHeaders();
         renderTable();
         // Validate current range input on load
@@ -1299,8 +1353,20 @@
         clickedButton.classList.add('active');
     }
 
+    function getColumnsForView(viewId) {
+        return viewId === 'flaggedMinersView' ? flaggedColumns : homeColumns;
+    }
+
+    function setColumnsForView(viewId, nextColumns) {
+        if (viewId === 'flaggedMinersView') {
+            flaggedColumns = nextColumns;
+            return;
+        }
+        homeColumns = nextColumns;
+    }
+
     // --- Main Table Header Drag Logic ---
-    function headerDragStart(e, id) {
+    function headerDragStart(e, id, viewId) {
         if (!columnDragEnabled) {
             e.preventDefault();
             return;
@@ -1308,9 +1374,10 @@
 
         isDraggingHeader = true;
         draggedHeaderId = id;
+        draggedHeaderViewId = viewId;
         headerDropTarget = null;
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', id);
+        e.dataTransfer.setData('text/plain', JSON.stringify({ id, viewId }));
         setTimeout(() => e.target.classList.add('header-dragging'), 0);
     }
 
@@ -1340,7 +1407,8 @@
         e.dataTransfer.dropEffect = 'move';
 
         const targetId = el.dataset.colId;
-        if (!targetId || targetId === draggedHeaderId) {
+        const targetViewId = el.dataset.viewId;
+        if (!targetId || targetId === draggedHeaderId || !targetViewId || targetViewId !== draggedHeaderViewId) {
             clearHeaderDropMarkers();
             headerDropTarget = null;
             return;
@@ -1349,15 +1417,15 @@
         const placement = getHeaderDropPlacement(el, e.clientX);
         clearHeaderDropMarkers();
         el.classList.add(placement === 'before' ? 'header-drop-before' : 'header-drop-after');
-        headerDropTarget = { id: targetId, placement };
+        headerDropTarget = { id: targetId, placement, viewId: targetViewId };
     }
 
-    function getReorderedColumnsWithPlacement(sourceId, targetId, placement) {
-        const sourceIndex = columns.findIndex(c => c.id === sourceId);
-        const targetIndex = columns.findIndex(c => c.id === targetId);
+    function getReorderedColumnsWithPlacement(sourceId, targetId, placement, sourceColumns) {
+        const sourceIndex = sourceColumns.findIndex(c => c.id === sourceId);
+        const targetIndex = sourceColumns.findIndex(c => c.id === targetId);
         if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return null;
 
-        const nextColumns = [...columns];
+        const nextColumns = [...sourceColumns];
         const [draggedColumn] = nextColumns.splice(sourceIndex, 1);
 
         let insertionIndex = targetIndex;
@@ -1380,12 +1448,13 @@
         const nextColumns = getReorderedColumnsWithPlacement(
             draggedHeaderId,
             headerDropTarget.id,
-            headerDropTarget.placement
+            headerDropTarget.placement,
+            getColumnsForView(headerDropTarget.viewId)
         );
         clearHeaderDropMarkers();
         if (!nextColumns) return;
 
-        columns = nextColumns;
+        setColumnsForView(headerDropTarget.viewId, nextColumns);
         
         renderHeaders();
         renderTable();
@@ -1400,14 +1469,16 @@
         setTimeout(() => { 
             isDraggingHeader = false; 
             draggedHeaderId = null; 
+            draggedHeaderViewId = null;
             headerDropTarget = null;
         }, 50);
     }
 
 
     // --- Modal Logic ---
-    function openModal() { 
-        pendingColumns = JSON.parse(JSON.stringify(columns)); 
+    function openModal(viewId) { 
+        pendingColumnsViewId = viewId || 'dashboardView';
+        pendingColumns = JSON.parse(JSON.stringify(getColumnsForView(pendingColumnsViewId))); 
         document.getElementById('applyBtn').disabled = true; 
         renderModalList();
         document.getElementById('colModal').style.display = 'flex'; 
@@ -1416,7 +1487,7 @@
     function closeModal() { document.getElementById('colModal').style.display = 'none'; }
 
     function applyChanges() {
-        columns = JSON.parse(JSON.stringify(pendingColumns));
+        setColumnsForView(pendingColumnsViewId, JSON.parse(JSON.stringify(pendingColumns)));
         renderHeaders();
         renderTable();
         document.getElementById('applyBtn').disabled = true; 
@@ -1437,7 +1508,7 @@
                      ondrop="modalDrop(event, ${index})"
                      ondragend="modalDragEnd(event)">
                     <span class="drag-handle">☰</span>
-                    <input type="checkbox" ${col.visible ? 'checked' : ''} onchange="toggleCol(${index})">
+                    <input type="checkbox" ${col.visible ? 'checked' : ''} ${col.lockVisible ? 'disabled' : ''} onchange="toggleCol(${index})">
                     <span class="label-text">${col.label}</span>
                 </div>
             `;
@@ -1445,6 +1516,7 @@
     }
 
     function toggleCol(index) {
+        if (pendingColumns[index].lockVisible) return;
         pendingColumns[index].visible = !pendingColumns[index].visible;
         markAsChanged(); 
     }
@@ -1475,20 +1547,36 @@
     }
 
     // --- Table Rendering Logic ---
-    function renderHeadersInto(headerRowId) {
+    function renderHeadersInto(headerRowId, viewId) {
         const headerRow = document.getElementById(headerRowId);
         if (!headerRow) return;
         headerRow.innerHTML = '';
+        const columns = getColumnsForView(viewId);
         
         columns.filter(c => c.visible).forEach(col => {
             const draggable = columnDragEnabled ? 'true' : 'false';
             const dragClass = columnDragEnabled ? 'header-draggable' : '';
             const ascActive = sortCol === col.id && sortAsc ? 'active' : '';
             const descActive = sortCol === col.id && !sortAsc ? 'active' : '';
+
+            if (col.id === 'flag') {
+                headerRow.innerHTML += `
+                    <th class="header-action-cell ${dragClass}" draggable="${draggable}" data-col-id="${col.id}" data-view-id="${viewId}"
+                        ondragstart="headerDragStart(event, '${col.id}', '${viewId}')"
+                        ondragover="headerDragOver(event, this)"
+                        ondrop="headerDrop(event)"
+                        ondragend="headerDragEnd(event)">
+                        <span class="header-content">
+                            <span class="header-label">${col.label}</span>
+                        </span>
+                    </th>
+                `;
+                return;
+            }
             
             headerRow.innerHTML += `
-                <th class="${dragClass}" draggable="${draggable}" data-col-id="${col.id}"
-                    ondragstart="headerDragStart(event, '${col.id}')"
+                <th class="${dragClass}" draggable="${draggable}" data-col-id="${col.id}" data-view-id="${viewId}"
+                    ondragstart="headerDragStart(event, '${col.id}', '${viewId}')"
                     ondragover="headerDragOver(event, this)"
                     ondrop="headerDrop(event)"
                     ondragend="headerDragEnd(event)">
@@ -1502,13 +1590,11 @@
                 </th>
             `;
         });
-
-        headerRow.innerHTML += `<th class="header-action-cell">Flag</th>`;
     }
 
     function renderHeaders() {
-        renderHeadersInto('tableHeaderRow');
-        renderHeadersInto('flaggedTableHeaderRow');
+        renderHeadersInto('tableHeaderRow', 'dashboardView');
+        renderHeadersInto('flaggedTableHeaderRow', 'flaggedMinersView');
     }
 
     function getSortedMinersList(miners) {
@@ -1532,46 +1618,56 @@
         return list;
     }
 
-    function renderTableBody(bodyId, miners) {
+    function renderTableBody(bodyId, miners, viewId) {
         const tbody = document.getElementById(bodyId);
         if (!tbody) return;
         tbody.innerHTML = '';
 
-        const visibleCols = columns.filter(c => c.visible);
+        const visibleCols = getColumnsForView(viewId).filter(c => c.visible);
         miners.forEach(miner => {
             const tr = document.createElement('tr');
             let rowHtml = '';
+            const flagged = isMinerFlagged(miner.ip);
+            const pendingRemoval = viewId === 'flaggedMinersView' && isFlaggedMinerPendingRemoval(miner.ip);
+            const homeLocked = viewId === 'dashboardView' && flagged;
+            const safeIp = escapeHtml(miner.ip || 'N/A');
+            const safeIpHref = escapeHtml(`http://${String(miner.ip || '').trim()}`);
+            const flagButtonLabel = flagged
+                ? (viewId === 'flaggedMinersView' ? (pendingRemoval ? 'Remove' : 'Reviewed') : 'Flagged')
+                : 'Flag';
+            const flagButtonAriaLabel = viewId === 'flaggedMinersView'
+                ? (pendingRemoval ? `Remove miner ${safeIp} from flagged list` : `Mark miner ${safeIp} as reviewed`)
+                : `${flagged ? 'Flagged miner' : 'Flag miner'} ${safeIp}`;
 
             visibleCols.forEach(col => {
-                if (col.id === 'status') {
+                if (col.id === 'flag') {
+                    rowHtml += `
+                        <td class="flag-action-cell">
+                            <button
+                                type="button"
+                                class="flag-toggle-btn${flagged ? ' active' : ''}${pendingRemoval ? ' pending-remove' : ''}${homeLocked ? ' home-locked' : ''}"
+                                onclick='handleFlagButtonAction(${JSON.stringify(String(miner.ip || ''))}, ${JSON.stringify(viewId)}); event.stopPropagation();'
+                                aria-label="${flagButtonAriaLabel}"
+                            >${flagButtonLabel}</button>
+                        </td>
+                    `;
+                } else if (col.id === 'status') {
                     rowHtml += `<td class="online">Online</td>`;
                 } else if (col.id === 'ip') {
-                    rowHtml += `<td><strong><a href="http://${miner.ip}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${miner.ip}</a></strong></td>`;
+                    rowHtml += `<td><strong><a href="${safeIpHref}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${safeIp}</a></strong></td>`;
                 } else if (col.id === 'hashrate') {
                     const hr = miner.hashrate;
-                    rowHtml += `<td>${hr && hr !== 'N/A' ? hr + ' TH/s' : 'N/A'}</td>`;
+                    const safeHashrate = hr && hr !== 'N/A' ? `${escapeHtml(hr)} TH/s` : 'N/A';
+                    rowHtml += `<td>${safeHashrate}</td>`;
                 } else if (col.id === 'fanStatus') {
                     const fanStatus = miner.fanStatus || 'N/A';
                     const match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(String(fanStatus));
                     const isAlert = match && Number(match[1]) < Number(match[2]);
-                    rowHtml += `<td${isAlert ? ' class="fan-alert"' : ''}>${fanStatus}</td>`;
+                    rowHtml += `<td${isAlert ? ' class="fan-alert"' : ''}>${escapeHtml(fanStatus)}</td>`;
                 } else {
-                    rowHtml += `<td>${miner[col.id] || 'N/A'}</td>`;
+                    rowHtml += `<td>${escapeHtml(miner[col.id] || 'N/A')}</td>`;
                 }
             });
-
-            const flagged = isMinerFlagged(miner.ip);
-            const safeIp = escapeHtml(miner.ip || 'N/A');
-            rowHtml += `
-                <td class="flag-action-cell">
-                    <button
-                        type="button"
-                        class="flag-toggle-btn${flagged ? ' active' : ''}"
-                        onclick='toggleFlaggedMiner(${JSON.stringify(String(miner.ip || ''))}); event.stopPropagation();'
-                        aria-label="${flagged ? 'Unflag' : 'Flag'} miner ${safeIp}"
-                    >${flagged ? 'Flagged' : 'Flag'}</button>
-                </td>
-            `;
 
             tr.innerHTML = rowHtml;
             tbody.appendChild(tr);
@@ -1579,11 +1675,13 @@
     }
 
     function renderTable() {
-        renderTableBody('minerTableBody', getSortedMinersList(minersData));
+        renderTableBody('minerTableBody', getSortedMinersList(minersData), 'dashboardView');
+
+        const minerByIp = new Map(minersData.map((item) => [String(item.ip || ''), item]));
 
         const flaggedMiners = getSortedMinersList(
             flaggedMinerIps.map((ip) => {
-                const miner = minersData.find(item => String(item.ip || '') === ip);
+                const miner = minerByIp.get(String(ip || ''));
                 if (miner) return miner;
                 return {
                     ip,
@@ -1608,7 +1706,7 @@
                 };
             })
         );
-        renderTableBody('flaggedMinerTableBody', flaggedMiners);
+        renderTableBody('flaggedMinerTableBody', flaggedMiners, 'flaggedMinersView');
     }
 
     function ipToNum(ip) {
@@ -1770,12 +1868,178 @@
         // Flagged miner table will render when main table renders.
     }
 
+    function initCachedMinerData() {
+        try {
+            const raw = localStorage.getItem(minerDataStorageKey);
+            if (!raw) {
+                minerDataLastUpdatedAt = null;
+                return;
+            }
+
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) {
+                minerDataLastUpdatedAt = null;
+                return;
+            }
+
+            minersData = parsed.filter((item) => item && typeof item === 'object' && item.ip).map((item) => ({
+                ip: String(item.ip || 'N/A'),
+                status: item.status || 'online',
+                hashrate: item.hashrate || 'N/A',
+                temp: item.temp || 'N/A',
+                fans: item.fans || 'N/A',
+                fanStatus: item.fanStatus || 'N/A',
+                voltage: item.voltage || 'N/A',
+                frequencyMHz: item.frequencyMHz || 'N/A',
+                hostname: item.hostname || 'N/A',
+                mac: item.mac || 'N/A',
+                ipMode: item.ipMode || 'N/A',
+                os: item.os || 'N/A',
+                osVersion: item.osVersion || 'N/A',
+                minerType: item.minerType || 'N/A',
+                cbType: item.cbType || 'N/A',
+                psuInfo: item.psuInfo || 'N/A',
+                activeHashboards: item.activeHashboards || 'N/A',
+                hashboards: item.hashboards || 'N/A',
+                pools: item.pools || 'N/A'
+            }));
+
+            const rawUpdatedAt = parseInt(localStorage.getItem(minerDataUpdatedAtStorageKey) || '', 10);
+            minerDataLastUpdatedAt = Number.isFinite(rawUpdatedAt) ? rawUpdatedAt : null;
+        } catch (_err) {
+            minersData = [];
+            minerDataLastUpdatedAt = null;
+        }
+    }
+
+    function persistCachedMinerData() {
+        try {
+            minerDataLastUpdatedAt = Date.now();
+            localStorage.setItem(minerDataStorageKey, JSON.stringify(minersData));
+            localStorage.setItem(minerDataUpdatedAtStorageKey, String(minerDataLastUpdatedAt));
+        } catch (_err) {
+            // Ignore storage quota/write errors.
+        }
+
+        updateMinerCacheStatus();
+    }
+
+    function formatMinerCacheTimestamp(timestampMs) {
+        if (!Number.isFinite(timestampMs)) return 'Unknown';
+        return new Date(timestampMs).toLocaleString();
+    }
+
+    function updateMinerCacheStatus() {
+        const statusEl = document.getElementById('minerCacheStatus');
+        const frontTimestampEl = document.getElementById('lastUpdatedDisplay');
+
+        if (!minerDataLastUpdatedAt || !minersData.length) {
+            if (statusEl) statusEl.innerText = 'Cache status: No cached miner data.';
+            if (frontTimestampEl) frontTimestampEl.innerText = 'Last updated: --';
+            return;
+        }
+
+        const formatted = formatMinerCacheTimestamp(minerDataLastUpdatedAt);
+        if (statusEl) statusEl.innerText = `Cache status: ${minersData.length} miner${minersData.length === 1 ? '' : 's'} cached. Last updated: ${formatted}.`;
+        if (frontTimestampEl) frontTimestampEl.innerText = `Last updated: ${formatted}`;
+    }
+
+    function clearMinerTable(showStatusMessage = true) {
+        flushPendingScanUiUpdate(true);
+        minersData = [];
+        minerDataLastUpdatedAt = null;
+        pendingFlaggedRemovalIps = [];
+        localStorage.removeItem(minerDataStorageKey);
+        localStorage.removeItem(minerDataUpdatedAtStorageKey);
+        updateMinerCacheStatus();
+        renderTable();
+
+        if (!showStatusMessage) return;
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            statusEl.innerText = 'Cleared miner table.';
+            statusEl.style.color = 'var(--status-color)';
+        }
+    }
+
+    function scheduleScanUiUpdate() {
+        if (!scanRenderRafId) {
+            scanRenderRafId = requestAnimationFrame(() => {
+                scanRenderRafId = null;
+                renderTable();
+            });
+        }
+
+        if (cachePersistTimerId) return;
+        cachePersistTimerId = setTimeout(() => {
+            cachePersistTimerId = null;
+            persistCachedMinerData();
+        }, cachePersistDebounceMs);
+    }
+
+    function flushPendingScanUiUpdate(forcePersist = false) {
+        if (scanRenderRafId) {
+            cancelAnimationFrame(scanRenderRafId);
+            scanRenderRafId = null;
+            renderTable();
+        }
+
+        if (cachePersistTimerId) {
+            clearTimeout(cachePersistTimerId);
+            cachePersistTimerId = null;
+            persistCachedMinerData();
+            return;
+        }
+
+        if (forcePersist) {
+            persistCachedMinerData();
+        }
+    }
+
+    function clearCachedMinerData() {
+        clearMinerTable(false);
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            statusEl.innerText = 'Cleared cached miner data.';
+            statusEl.style.color = 'var(--status-color)';
+        }
+    }
+
     function persistFlaggedMiners() {
         localStorage.setItem(flaggedMinerStorageKey, JSON.stringify(flaggedMinerIps));
     }
 
     function isMinerFlagged(ip) {
         return flaggedMinerIps.includes(String(ip || '').trim());
+    }
+
+    function isFlaggedMinerPendingRemoval(ip) {
+        return pendingFlaggedRemovalIps.includes(String(ip || '').trim());
+    }
+
+    function handleFlagButtonAction(ip, viewId) {
+        const normalizedIp = String(ip || '').trim();
+        if (!normalizedIp) return;
+
+        if (viewId !== 'flaggedMinersView') {
+            if (!isMinerFlagged(normalizedIp)) {
+                toggleFlaggedMiner(normalizedIp);
+            }
+            return;
+        }
+
+        if (!isMinerFlagged(normalizedIp)) {
+            toggleFlaggedMiner(normalizedIp);
+            return;
+        }
+
+        if (isFlaggedMinerPendingRemoval(normalizedIp)) {
+            toggleFlaggedMiner(normalizedIp);
+            return;
+        }
+
+        pendingFlaggedRemovalIps = [normalizedIp];
+        renderTable();
     }
 
     function toggleFlaggedMiner(ip) {
@@ -1788,6 +2052,8 @@
         } else {
             flaggedMinerIps.unshift(normalizedIp);
         }
+
+        pendingFlaggedRemovalIps = pendingFlaggedRemovalIps.filter((item) => item !== normalizedIp);
 
         persistFlaggedMiners();
         renderTable();
@@ -2758,6 +3024,7 @@
 
         status.innerText = `Done. Total: ${minersData.length}`;
         status.style.color = 'var(--success-color)';
+        persistCachedMinerData();
         renderTable();
     }
 
@@ -2766,6 +3033,7 @@
         if (!scanInProgress) return;
 
         scanInProgress = false;
+        flushPendingScanUiUpdate(true);
         if (eventSource) {
             eventSource.close();
             eventSource = null;
@@ -2807,6 +3075,7 @@
         btn.innerText = "Scanning...";
         if (stopBtn) stopBtn.disabled = false;
         minersData = []; 
+        persistCachedMinerData();
         renderTable();   
         
         status.innerText = `Found 0.`;
@@ -2848,12 +3117,13 @@
             });
 
             status.innerText = `Found ${minersData.length}.`;
-            renderTable();
+            scheduleScanUiUpdate();
         };
 
         eventSource.addEventListener('done', function() {
             if (!scanInProgress) return;
             scanInProgress = false;
+            flushPendingScanUiUpdate(true);
             eventSource.close();
             eventSource = null;
             btn.innerText = "Scan Network";
@@ -2866,6 +3136,7 @@
         eventSource.onerror = function() {
             if (!scanInProgress) return;
             scanInProgress = false;
+            flushPendingScanUiUpdate(true);
             eventSource.close();
             eventSource = null;
             btn.innerText = "Scan Network";

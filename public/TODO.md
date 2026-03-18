@@ -1,4 +1,5 @@
-# The Miner Locator - Roadmap
+<!-- Version: 0.2.1 -->
+# Miner-Finder - Roadmap
 
 ## Frontend
 - [x] Build the main HTML UI
@@ -13,7 +14,7 @@
 - [x] Reduce sidebar width and add category icons above labels
 - [x] Make sidebar about half-width and use monochromatic minimal category icons
 - [x] Restyle sidebar to match stacked icon-over-text reference layout
-- [x] Make sidebar full-height, move Settings above version, and set version to v1.0.1
+- [x] Make sidebar full-height, move Settings above version, and set version to v0.2.1
 - [x] Remove sidebar outer gaps, add collapse toggle, and change Settings icon to wrench
 - [x] Reposition collapse toggle to vertical center and extend it left outside sidebar
 - [x] Move collapse toggle to the right side of the sidebar
@@ -58,3 +59,13 @@
 
 ## Other
 - [ ] //TODO function and VS Code Extensions
+
+## Security and Optimization Findings (2026-03-18)
+- [ ] Add optional auth/token guard for `/api/scan` and `/api/debug/:ip` if this app is ever exposed beyond localhost.
+- [x] Keep `/api/debug/:ip` available in normal local runtime.
+- [ ] Add optional lightweight per-IP request rate limit middleware for scan/debug endpoints.
+- [x] Replace blocking Linux ARP read with async cached ARP lookup (`ARP_CACHE_TTL_MS`).
+- [x] Add global miner-check throttle to smooth load across concurrent scans (`GLOBAL_CHECK_CONCURRENCY`).
+- [x] Batch frontend scan table renders and cache writes to reduce UI/storage churn.
+- [x] Escape miner table cell output and IP links to reduce XSS risk from malformed device data.
+- [ ] Add automated regression tests for scan stream parsing and frontend table rendering safety.

@@ -1,17 +1,23 @@
 {
-  "name": "scanner",
-  "version": "1.0.0",
+  "name": "miner-finder",
+  "$comment": "Version: 0.2.1",
+  "version": "0.2.1",
   "description": "",
   "main": "server.js",
+  "bin": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build:minify": "node scripts/minify-client.js",
-    "build:exe": "pkg . --compress GZip --out-path dist",
+    "build:exe": "VERSION=$(node -p \"require('./package.json').version\") && pkg . --compress GZip --output dist/miner-finder-v$VERSION",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "pkg": {
-    "assets": ["public/**/*"],
-    "targets": ["node20-linux-x64", "node20-win-x64"]
+    "assets": [
+      "public/**/*"
+    ],
+    "targets": [
+      "node20-linux-x64",
+      "node20-win-x64"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -20,7 +26,6 @@
     "express": "^5.2.1"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^5.15.0",
-    "terser": "^5.39.2"
+    "@yao-pkg/pkg": "^5.15.0"
   }
 }

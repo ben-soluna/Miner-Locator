@@ -1,4 +1,5 @@
-# Scanner
+<!-- Version: 0.2.1 -->
+# Miner-Finder
 
 Last updated: 2026-03-17 (session 2)
 
@@ -20,7 +21,7 @@ Frontend next:
 - Add a Settings control to resize the sidebar width.
 - Reintroduce a production-ready Site Map view after redesign.
 
-Backend (completed):
+Backend (incomplete):
 
 - Sends `summary+stats+pools+version+devs` as a single joined CGMiner command per host.
 - `devdetails` deferred to a conditional extra pass — not fetched unless fields are missing.
@@ -63,7 +64,7 @@ docs/OPERATIONS.md       # Backup, restore, release, and routine ops
 
 ## Scan Input Formats
 
-The scanner accepts these range formats:
+Miner-Finder accepts these range formats:
 
 - Single IP: `10.10.1.14`
 - Dash range: `10.10.1.1-10.10.1.254`
