@@ -1,14 +1,18 @@
 {
   "name": "miner-finder",
-  "$comment": "Version: 0.2.1",
-  "version": "0.2.1",
+  "$comment": "Version: 0.2.2",
+  "version": "0.2.2",
   "description": "",
   "main": "server.js",
   "bin": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build:exe": "VERSION=$(node -p \"require('./package.json').version\") && pkg . --compress GZip --output dist/miner-finder-v$VERSION",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:exe": "node scripts/build-exe.js",
+    "check:syntax": "node --check server.js && node --check scripts/build-exe.js && node --check scripts/run-api-check.js && node --check scripts/run-ui-smoke.js && node --check scripts/selenium-clickthrough.js",
+    "test": "npm run test:project",
+    "test:api": "node scripts/run-api-check.js",
+    "test:ui-smoke": "node scripts/run-ui-smoke.js",
+    "test:project": "npm run check:syntax && npm run test:api && npm run test:ui-smoke && npm run build:exe"
   },
   "pkg": {
     "assets": [
@@ -26,6 +30,7 @@
     "express": "^5.2.1"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^5.15.0"
+    "@yao-pkg/pkg": "^5.15.0",
+    "selenium-webdriver": "^4.41.0"
   }
 }

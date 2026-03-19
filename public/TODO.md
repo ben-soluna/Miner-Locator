@@ -1,4 +1,4 @@
-<!-- Version: 0.2.1 -->
+<!-- Version: 0.2.2 -->
 # Miner-Finder - Roadmap
 
 ## Frontend
@@ -14,7 +14,7 @@
 - [x] Reduce sidebar width and add category icons above labels
 - [x] Make sidebar about half-width and use monochromatic minimal category icons
 - [x] Restyle sidebar to match stacked icon-over-text reference layout
-- [x] Make sidebar full-height, move Settings above version, and set version to v0.2.1
+- [x] Make sidebar full-height, move Settings above version, and set version to v0.2.2
 - [x] Remove sidebar outer gaps, add collapse toggle, and change Settings icon to wrench
 - [x] Reposition collapse toggle to vertical center and extend it left outside sidebar
 - [x] Move collapse toggle to the right side of the sidebar
@@ -56,6 +56,7 @@
 - [x] Defer `devdetails` / `edevs` / `config` to a conditional extra pass (only when fields are still missing after base pass).
 - [x] Add `MINER_API_TIMEOUT_MS` env variable (default 1200 ms, min 200 ms).
 - [x] Add `client.setNoDelay(true)` to reduce TCP Nagle latency on miner connections.
+- [ ] Map `Hashboard Number` from `devs` call `STATUS[0].Msg` format (for example, `"3 ASC(s)"` means 3 active hashboards).
 
 ## Other
 - [ ] //TODO function and VS Code Extensions
@@ -69,3 +70,27 @@
 - [x] Batch frontend scan table renders and cache writes to reduce UI/storage churn.
 - [x] Escape miner table cell output and IP links to reduce XSS risk from malformed device data.
 - [ ] Add automated regression tests for scan stream parsing and frontend table rendering safety.
+
+## Column Data-Link Review (One By One)
+- Rule: use only the explicitly assigned miner API call(s) per column; if absent, keep `N/A` (no cross-call or HTTP/ARP/DNS fallback fill-ins).
+- [ ] `ip` column: verify mapping from backend `result.ip` to frontend `miner.ip` and link rendering.
+- [ ] `status` column: confirm current hardcoded `Online` behavior vs backend `status` field.
+- [x] `hostname` column: removed from table/column manager as redundant with IP Address column.
+- [x] `mac` column: backend source is `config[0].CONFIG[0].MACAddr` only; if missing/invalid, value stays `N/A`; frontend displays backend `mac` value.
+- [ ] `ipMode` column: verify backend normalization (`DHCP`/`Static`) and frontend display.
+- [ ] `os` column: verify backend aliasing (`osType` to `os`) and frontend fallback behavior.
+- [ ] `osVersion` column: verify backend source keys and frontend display.
+- [x] `minerType` column: backend source is `stats[].Type` only in `deriveProfile()`; if missing, value stays `N/A`; frontend displays `miner.minerType`.
+- [ ] `cbType` column: verify backend control-board derivation and alias mapping.
+- [ ] `psuInfo` column: verify backend field extraction and frontend display.
+- [x] `temp` column: backend source is `stats[0].STATS[1].temp_max` (strict priority), else `N/A`; frontend displays backend `temp` value.
+- [ ] `fans` column: verify backend fan-speed aggregation and frontend display.
+- [ ] `fanStatus` column: verify backend active/total derivation and frontend alert styling.
+- [ ] `voltage` column: verify backend derivation and frontend display.
+- [ ] `frequencyMHz` column: verify backend derivation and frontend display.
+- [ ] `hashrate` column: verify backend TH/s derivation plus frontend summary fallback path.
+- [ ] `activeHashboards` column: verify backend derivation and frontend display; source rule is `devs` call `STATUS[0].Msg` (for example, `"3 ASC(s)"` means 3 active hashboards).
+- [ ] `hashboards` column: verify backend active/total derivation and frontend display.
+- [ ] `pools` column: verify backend pool URL extraction/joining and frontend display.
+- [ ] `flag` action column: verify frontend-only state model (`flaggedMinerIps`) independent of backend payload fields.
+- [ ] `Debug JSON` action button: verify visibility condition (`hasDebugPayload`) and endpoint behavior (`/api/scan/last?ip=`).

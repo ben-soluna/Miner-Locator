@@ -1,4 +1,4 @@
-// Version: 0.2.1
+// Version: 0.2.2
 const express = require('express');
 const net = require('net');
 const path = require('path');
@@ -19,6 +19,7 @@ const MAX_SCAN_CONCURRENCY = 128;
 const GLOBAL_CHECK_CONCURRENCY = Math.max(1, parseInt(process.env.GLOBAL_CHECK_CONCURRENCY || '96', 10) || 96);
 const ARP_CACHE_TTL_MS = Math.max(200, parseInt(process.env.ARP_CACHE_TTL_MS || '1500', 10) || 1500);
 const AUTO_OPEN_BROWSER = !['0', 'false', 'no', 'off'].includes(String(process.env.AUTO_OPEN_BROWSER || '1').trim().toLowerCase());
+const ENABLE_ENRICHMENT_FALLBACK = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_ENRICHMENT_FALLBACK || '0').trim().toLowerCase());
 
 let activeHttpFallback = 0;
 const httpFallbackQueue = [];
@@ -26,6 +27,7 @@ let activeGlobalChecks = 0;
 const globalCheckQueue = [];
 let arpCacheByIp = null;
 let arpCacheUpdatedAt = 0;
+let lastScanSnapshot = null;
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -126,6 +128,12 @@ function parseScanConcurrency(input) {
     const parsed = parseInt(String(input).trim(), 10);
     if (!Number.isFinite(parsed)) return SCAN_CONCURRENCY;
     return Math.max(MIN_SCAN_CONCURRENCY, Math.min(MAX_SCAN_CONCURRENCY, parsed));
+}
+
+function parsePositiveLimit(input, fallback = 200) {
+    const parsed = parseInt(String(input || ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
 }
 
 function checkMiner(ip) {
@@ -463,12 +471,29 @@ function firstRecord(payload, sectionNames) {
 }
 
 function sectionArray(payload, sectionNames) {
+    const wanted = new Set(sectionNames.map(normKey));
+
+    // Some miner responses are wrapped as an array of envelope objects, e.g.
+    // [ { STATS: [...], STATUS: [...], id: 1 } ].
+    if (Array.isArray(payload)) {
+        for (const item of payload) {
+            const found = sectionArray(item, sectionNames);
+            if (found.length) return found;
+        }
+        return [];
+    }
+
     if (!payload || typeof payload !== 'object') return [];
 
-    const wanted = new Set(sectionNames.map(normKey));
     for (const [section, value] of Object.entries(payload)) {
         if (!wanted.has(normKey(section))) continue;
         if (Array.isArray(value)) return value.filter(item => item && typeof item === 'object');
+    }
+
+    // Fallback for nested envelopes.
+    for (const nested of Object.values(payload)) {
+        const found = sectionArray(nested, sectionNames);
+        if (found.length) return found;
     }
 
     return [];
@@ -515,6 +540,15 @@ function parseMacAddress(...records) {
     return 'N/A';
 }
 
+function deriveMacFromConfig(configRecords) {
+    if (!Array.isArray(configRecords) || configRecords.length < 1) return 'N/A';
+
+    const macRaw = pickField(configRecords[0], ['macaddr']);
+    const match = String(macRaw || '').match(/([0-9a-f]{2}[:-]){5}[0-9a-f]{2}/i);
+    if (!match) return 'N/A';
+    return String(match[0]).toUpperCase();
+}
+
 function derivePoolString(poolsPayload) {
     const pools = sectionArray(poolsPayload, ['pools']);
     const urls = pools
@@ -527,7 +561,7 @@ function derivePoolString(poolsPayload) {
     return Array.from(new Set(urls)).join(', ');
 }
 
-function deriveHashrateTHs(summaryRecords, devsArray) {
+function deriveHashrateTHs(summaryRecords) {
     const ghs5s = pickFieldFromRecords(summaryRecords, ['ghs5s', 'ghs 5s']);
     const ghsAvg = pickFieldFromRecords(summaryRecords, ['ghsav', 'ghs av']);
 
@@ -540,14 +574,6 @@ function deriveHashrateTHs(summaryRecords, devsArray) {
         const num = parseFloat(String(ghsAvg));
         if (Number.isFinite(num)) return (num / 1000).toFixed(2);
     }
-
-    let totalMhs = 0;
-    for (const dev of devsArray) {
-        const mhs5s = pickField(dev, ['mhs5s', 'mhs 5s']);
-        const num = parseFloat(String(mhs5s));
-        if (Number.isFinite(num)) totalMhs += num;
-    }
-    if (totalMhs > 0) return (totalMhs / 1000000).toFixed(2);
 
     return 'N/A';
 }
@@ -646,33 +672,32 @@ function normalizeControlBoard(allRecords) {
     return 'N/A';
 }
 
-function deriveTempC(statsRecords, devsArray) {
+function deriveTempC(statsRecords) {
+    // Strict mapping requirement: prefer STATS[1].temp_max.
+    if (Array.isArray(statsRecords) && statsRecords.length > 1) {
+        const tempMax = pickField(statsRecords[1], ['temp_max']);
+        const num = parseFloat(String(tempMax));
+        if (Number.isFinite(num) && num >= -20 && num <= 200) {
+            return num.toFixed(1);
+        }
+    }
+
     const fromStats = [];
     for (const statsRecord of statsRecords) {
         fromStats.push(...listNumbersByHints(statsRecord, ['temp'], { min: -20, max: 200 }));
     }
-    const fromDevs = [];
-    for (const dev of devsArray) {
-        fromDevs.push(...listNumbersByHints(dev, ['temp'], { min: -20, max: 200 }));
-    }
-
-    const all = [...fromStats, ...fromDevs];
+    const all = [...fromStats];
     if (!all.length) return 'N/A';
     const avg = all.reduce((sum, n) => sum + n, 0) / all.length;
     return avg.toFixed(1);
 }
 
-function deriveFanSummary(statsRecords, devsArray) {
+function deriveFanSummary(statsRecords) {
     const fromStats = [];
     for (const statsRecord of statsRecords) {
         fromStats.push(...listNumbersByHints(statsRecord, ['fan'], { min: 200, max: 30000 }));
     }
-    const fromDevs = [];
-    for (const dev of devsArray) {
-        fromDevs.push(...listNumbersByHints(dev, ['fan'], { min: 200, max: 30000 }));
-    }
-
-    const fans = [...fromStats, ...fromDevs];
+    const fans = [...fromStats];
     if (!fans.length) return 'N/A';
     return fans.map(v => Math.round(v)).join('/');
 }
@@ -682,7 +707,7 @@ function deriveFanSummary(statsRecords, devsArray) {
 //   1. Use `fan_num` / `Fan Num` (reported by cgminer/bmminer) as the running count,
 //      and count individual Fan1…FanN RPM slots (including 0 RPM) as the total.
 //   2. If fan_num is absent, fall back to counting slots > 200 RPM as running.
-function deriveFanStatus(statsRecords, devsArray) {
+function deriveFanStatus(statsRecords) {
     // Count only explicit fan slot keys (fan1/fan2/...), not aggregate fields
     // like fan_num, fan_pwm, fan duty, etc. which would inflate totals.
     const collectFrom = (records) => {
@@ -702,10 +727,7 @@ function deriveFanStatus(statsRecords, devsArray) {
         return fanSlots;
     };
 
-    // Prefer STATS fan slots; only fall back to DEVS if STATS has none.
-    let fanSlots = collectFrom(statsRecords);
-    if (!fanSlots.size) fanSlots = collectFrom(devsArray);
-
+    const fanSlots = collectFrom(statsRecords);
     const allSlots = Array.from(fanSlots.values());
     if (!allSlots.length) return 'N/A';
 
@@ -716,7 +738,7 @@ function deriveFanStatus(statsRecords, devsArray) {
     return `${running}/${total}`;
 }
 
-function deriveVoltage(statsRecords, devsArray) {
+function deriveVoltage(statsRecords) {
     const fromStats = [];
     for (const statsRecord of statsRecords) {
         fromStats.push(...listNumbersByHints(statsRecord, ['volt', 'voltage'], {
@@ -725,62 +747,42 @@ function deriveVoltage(statsRecords, devsArray) {
             exclude: ['volatile']
         }));
     }
-    const fromDevs = [];
-    for (const dev of devsArray) {
-        fromDevs.push(...listNumbersByHints(dev, ['volt', 'voltage'], { min: 0, max: 2000 }));
-    }
-
-    const values = [...fromStats, ...fromDevs];
+    const values = [...fromStats];
     if (!values.length) return 'N/A';
     const avg = values.reduce((sum, n) => sum + n, 0) / values.length;
     return formatMaybeNumber(avg, 2);
 }
 
-function deriveFrequencyMHz(statsRecords, devsArray) {
+function deriveFrequencyMHz(statsRecords) {
     const fromStats = [];
     for (const statsRecord of statsRecords) {
         fromStats.push(...listNumbersByHints(statsRecord, ['freq', 'frequency'], { min: 10, max: 20000 }));
     }
-    const fromDevs = [];
-    for (const dev of devsArray) {
-        fromDevs.push(...listNumbersByHints(dev, ['freq', 'frequency'], { min: 10, max: 20000 }));
-    }
-
-    const values = [...fromStats, ...fromDevs];
+    const values = [...fromStats];
     if (!values.length) return 'N/A';
     const avg = values.reduce((sum, n) => sum + n, 0) / values.length;
     return formatMaybeNumber(avg, 0);
 }
 
-function deriveHashboards(devsArray, statsRecords) {
-    const totalFromDevs = devsArray.length;
-    let total = totalFromDevs;
+function deriveHashboards(statsRecords) {
+    const totalStat = pickFieldFromRecords(statsRecords, ['hashboard', 'hashboards', 'chainnum', 'chain num']);
+    const activeStat = pickFieldFromRecords(statsRecords, ['activehashboard', 'active hashboards', 'chainacn', 'chain acn']);
+    const total = parseInt(totalStat, 10);
+    const active = parseInt(activeStat, 10);
 
-    if (!total) {
-        const totalStat = pickFieldFromRecords(statsRecords, ['hashboard', 'hashboards', 'chainnum', 'chain num']);
-        const totalNum = parseInt(totalStat, 10);
-        if (Number.isFinite(totalNum) && totalNum >= 0) total = totalNum;
+    if (!Number.isFinite(total) && !Number.isFinite(active)) {
+        return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
 
-    let active = 0;
-    if (totalFromDevs > 0) {
-        for (const dev of devsArray) {
-            const status = String(pickField(dev, ['status']) || '').toLowerCase();
-            const mhs5s = parseFloat(String(pickField(dev, ['mhs5s', 'mhs 5s']) || '0'));
-            if (status === 'alive' || status === 'on' || mhs5s > 0) active += 1;
-        }
-    } else if (total > 0) {
-        const activeStat = pickFieldFromRecords(statsRecords, ['activehashboard', 'active hashboards', 'chainacn', 'chain acn']);
-        const activeNum = parseInt(activeStat, 10);
-        if (Number.isFinite(activeNum) && activeNum >= 0) active = activeNum;
+    const resolvedActive = Number.isFinite(active) && active >= 0 ? active : null;
+    const resolvedTotal = Number.isFinite(total) && total >= 0 ? total : null;
+    if (resolvedActive === null || resolvedTotal === null) {
+        return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
-
-    if (!total && !active) return { hashboards: 'N/A', activeHashboards: 'N/A' };
-    if (!total && active) total = active;
 
     return {
-        hashboards: `${active}/${total}`,
-        activeHashboards: String(active)
+        hashboards: `${resolvedActive}/${resolvedTotal}`,
+        activeHashboards: String(resolvedActive)
     };
 }
 
@@ -788,55 +790,40 @@ function deriveProfile(ip, payloads) {
     const summaryRecords = sectionArray(payloads.summary, ['summary']);
     const statsRecords = sectionArray(payloads.stats, ['stats']);
     const versionRecords = sectionArray(payloads.version, ['version']);
-    const devDetailsRecords = sectionArray(payloads.devdetails, ['devdetails', 'devdetail']);
     const devs = sectionArray(payloads.devs, ['devs']);
-    const eDevs = sectionArray(payloads.edevs, ['edevs', 'edev']);
     const configRecords = sectionArray(payloads.config, ['config']);
-    const allRecords = [
-        ...collectObjectRecords(payloads.summary),
-        ...collectObjectRecords(payloads.stats),
-        ...collectObjectRecords(payloads.version),
-        ...collectObjectRecords(payloads.devdetails),
-        ...collectObjectRecords(payloads.devs),
-        ...collectObjectRecords(payloads.edevs),
-        ...collectObjectRecords(payloads.config)
-    ];
 
-    // Prioritise the STATS[0].Type field which Bitmain puts the model name in,
-    // then fall back to other common field names across all records.
+    // Strict-source mapping: Miner Type is only sourced from STATS.Type.
+    // If STATS does not provide it, return N/A.
     const statsRecordsForType = sectionArray(payloads.stats, ['stats']);
-    const minerType =
-        pickFieldFromRecords(statsRecordsForType, ['type']) ||
-        pickFieldFromRecords(allRecords, ['minertype', 'miner type', 'miner model', 'model', 'type']) ||
-        'N/A';
+    const minerType = pickFieldFromRecords(statsRecordsForType, ['type']) || 'N/A';
 
-    const controlBoard = normalizeControlBoard(allRecords);
+    const controlBoard = normalizeControlBoard(statsRecords);
 
-    const osType = normalizeFirmware(allRecords);
+    const osType = normalizeFirmware(versionRecords);
 
     const osVersion =
-        pickFieldFromRecords(allRecords, ['api', 'fwversion', 'osversion', 'firmwareversion', 'version', 'compiletime']) ||
+        pickFieldFromRecords(versionRecords, ['api', 'fwversion', 'osversion', 'firmwareversion', 'version', 'compiletime']) ||
         'N/A';
 
     const hostname =
-        pickFieldFromRecords(allRecords, ['hostname', 'host', 'miner_name']) ||
+        pickFieldFromRecords(statsRecords, ['hostname', 'host', 'miner_name']) ||
         'N/A';
 
-    const combinedDevs = [...devs, ...eDevs];
-    const hashrateTHs = deriveHashrateTHs(summaryRecords, combinedDevs);
-    const temperatureC = deriveTempC(statsRecords, combinedDevs);
-    const fans = deriveFanSummary(statsRecords, combinedDevs);
-    const fanStatus = deriveFanStatus(statsRecords, combinedDevs);
-    const voltage = deriveVoltage(statsRecords, combinedDevs);
-    const frequencyMHz = deriveFrequencyMHz(statsRecords, combinedDevs);
+    const hashrateTHs = deriveHashrateTHs(summaryRecords);
+    const temperatureC = deriveTempC(statsRecords);
+    const fans = deriveFanSummary(statsRecords);
+    const fanStatus = deriveFanStatus(statsRecords);
+    const voltage = deriveVoltage(statsRecords);
+    const frequencyMHz = deriveFrequencyMHz(statsRecords);
     const pools = derivePoolString(payloads.pools);
-    const hashboardData = deriveHashboards(combinedDevs, statsRecords);
+    const hashboardData = deriveHashboards(statsRecords);
 
     const psuInfo =
-        pickFieldFromRecords(allRecords, ['psu', 'powermode', 'power mode', 'powertype', 'power type', 'powerlimit']) ||
+        pickFieldFromRecords(statsRecords, ['psu', 'powermode', 'power mode', 'powertype', 'power type', 'powerlimit']) ||
         'N/A';
 
-    const ipModeRaw = pickFieldFromRecords([...allRecords, ...configRecords], [
+    const ipModeRaw = pickFieldFromRecords(configRecords, [
         'dhcp',
         'dhcpstatus',
         'dhcp4',
@@ -856,7 +843,7 @@ function deriveProfile(ip, payloads) {
         ip,
         status: 'online',
         hostname: String(hostname || 'N/A'),
-        mac: parseMacAddress(...allRecords),
+        mac: deriveMacFromConfig(configRecords),
         osType: String(osType || 'N/A'),
         osVersion: String(osVersion || 'N/A'),
         minerType: String(minerType || 'N/A'),
@@ -983,12 +970,9 @@ async function checkMinerDetailed(ip) {
         version
     });
 
+    // Strict-source mapping: only fields sourced from CONFIG justify extra commands.
     const needsExtra =
-        isMissing(base.minerType) ||
-        isMissing(base.controlBoard) ||
-        isMissing(base.psuInfo) ||
-        isMissing(base.voltage) ||
-        isMissing(base.frequencyMHz) ||
+        isMissing(base.mac) ||
         isMissing(base.ipMode);
 
     if (needsExtra) {
@@ -1007,6 +991,10 @@ async function checkMinerDetailed(ip) {
             config,
             version
         });
+    }
+
+    if (!ENABLE_ENRICHMENT_FALLBACK) {
+        return base;
     }
 
     return enrichMissingFields(base);
@@ -1089,9 +1077,26 @@ app.get('/api/scan', async (req, res) => {
     let foundCount = 0;
     let aborted = false;
     const targets = [];
+    const startedAt = new Date().toISOString();
+
+    lastScanSnapshot = {
+        startedAt,
+        finishedAt: null,
+        aborted: false,
+        range: String(range || ''),
+        requestedTotal: parsed.total,
+        targetCount: 0,
+        scanConcurrency,
+        foundCount: 0,
+        results: []
+    };
 
     req.on('close', () => {
         aborted = true;
+        if (lastScanSnapshot) {
+            lastScanSnapshot.aborted = true;
+            lastScanSnapshot.finishedAt = new Date().toISOString();
+        }
     });
 
     for (const interval of parsed.ranges) {
@@ -1102,6 +1107,10 @@ app.get('/api/scan', async (req, res) => {
         }
     }
 
+    if (lastScanSnapshot) {
+        lastScanSnapshot.targetCount = targets.length;
+    }
+
     await runWithConcurrency(targets, scanConcurrency, async (ipStr) => {
         if (aborted) return;
 
@@ -1109,14 +1118,77 @@ app.get('/api/scan', async (req, res) => {
         if (aborted) return;
         if (result && result.status === 'online') {
             foundCount++;
+            if (lastScanSnapshot) {
+                lastScanSnapshot.foundCount = foundCount;
+                // Preserve full miner payload for post-scan debugging.
+                lastScanSnapshot.results.push(result);
+            }
             res.write(`data: ${JSON.stringify(result)}\n\n`);
         }
     });
 
     console.log(`Scan complete. Found ${foundCount} miners.`);
+    if (lastScanSnapshot) {
+        lastScanSnapshot.foundCount = foundCount;
+        lastScanSnapshot.aborted = aborted;
+        lastScanSnapshot.finishedAt = new Date().toISOString();
+    }
     if (aborted) return;
     res.write(`event: done\ndata: {}\n\n`);
     res.end();
+});
+
+// Returns the full payloads captured during the most recent scan for debugging.
+// Query params:
+//   ip=<address>   return only one miner result if present
+//   limit=<n>      return at most n results (default 200)
+app.get('/api/scan/last', (req, res) => {
+    if (!lastScanSnapshot) {
+        return res.status(404).json({ error: 'No scan snapshot is available yet.' });
+    }
+
+    const ip = String(req.query.ip || '').trim();
+    if (ip) {
+        const match = lastScanSnapshot.results.find(item => String(item.ip || '') === ip);
+        if (!match) {
+            return res.status(404).json({
+                error: `No miner found for IP ${ip} in the latest scan snapshot.`
+            });
+        }
+
+        return res.json({
+            meta: {
+                startedAt: lastScanSnapshot.startedAt,
+                finishedAt: lastScanSnapshot.finishedAt,
+                aborted: lastScanSnapshot.aborted,
+                range: lastScanSnapshot.range,
+                requestedTotal: lastScanSnapshot.requestedTotal,
+                targetCount: lastScanSnapshot.targetCount,
+                foundCount: lastScanSnapshot.foundCount,
+                scanConcurrency: lastScanSnapshot.scanConcurrency
+            },
+            result: match
+        });
+    }
+
+    const limit = parsePositiveLimit(req.query.limit, 200);
+    const results = lastScanSnapshot.results.slice(0, limit);
+
+    return res.json({
+        meta: {
+            startedAt: lastScanSnapshot.startedAt,
+            finishedAt: lastScanSnapshot.finishedAt,
+            aborted: lastScanSnapshot.aborted,
+            range: lastScanSnapshot.range,
+            requestedTotal: lastScanSnapshot.requestedTotal,
+            targetCount: lastScanSnapshot.targetCount,
+            foundCount: lastScanSnapshot.foundCount,
+            scanConcurrency: lastScanSnapshot.scanConcurrency,
+            returned: results.length,
+            totalResults: lastScanSnapshot.results.length
+        },
+        results
+    });
 });
 
 // CHANGED: The console message now matches the official name!

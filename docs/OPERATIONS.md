@@ -1,4 +1,4 @@
-<!-- Version: 0.2.1 -->
+<!-- Version: 0.2.2 -->
 # Operations Runbook
 
 Last updated: 2026-03-17 (session 2)

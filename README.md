@@ -1,4 +1,4 @@
-<!-- Version: 0.2.1 -->
+<!-- Version: 0.2.2 -->
 # Miner-Finder
 
 Last updated: 2026-03-17 (session 2)
@@ -48,16 +48,30 @@ Open:
 
 - `npm start`
   - Starts `server.js` on port `3000`.
-- `npm run build:minify`
-  - Minifies inline client JavaScript from `public/index.html` and writes output to `public/index.min.html`.
+- `npm run test:api`
+  - Verifies backend basics (`GET /` and input validation on `GET /api/scan`).
+- `npm run test:ui-smoke`
+  - Runs the UI clickthrough test against a running server (or starts one automatically).
+- `npm run build:exe`
+  - Builds an OS-native executable into `dist/` (`linux` on Linux, `win.exe` on Windows).
+- `npm run test:project`
+  - Full verification pipeline: syntax checks + API checks + UI clickthrough + executable build.
+
+## Windows Validation
+
+- Full project checks run on both Linux and Windows via GitHub Actions:
+  - `.github/workflows/full-project.yml`
+- Push or open a PR to execute the same `npm run test:project` pipeline on `windows-latest`.
 
 ## Project Structure
 
 ```text
 server.js                # Express server + scan API
 public/index.html        # Main UI (single-page HTML/CSS/JS)
-public/index.min.html    # Generated minified build output
-scripts/minify-client.js # Minify pipeline for inline client JS
+scripts/run-api-check.js # Backend HTTP validation checks
+scripts/run-ui-smoke.js  # Starts server if needed and runs UI clickthrough
+scripts/selenium-clickthrough.js # Browser automation for core UI flows
+scripts/build-exe.js     # Cross-platform pkg build wrapper
 docs/API.md              # API contract and scan validation behavior
 docs/OPERATIONS.md       # Backup, restore, release, and routine ops
 ```
@@ -84,9 +98,9 @@ Validation is enforced server-side in `server.js`.
 - If scan does not start:
   - Verify input format in the Home tab.
   - Check backend logs from `npm start`.
-- If minify build fails:
+- If project verification fails:
   - Ensure dependencies are installed: `npm install`.
-  - Re-run: `npm run build:minify`.
+  - Re-run: `npm run test:project`.
 
 ## Related Docs
 
