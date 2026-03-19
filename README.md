@@ -59,6 +59,8 @@ Open:
   - Creates a shareable `portable-win/` folder with `miner-finder.exe`, `start.bat`, and `README.txt`.
 - `npm run bundle:usb:win`
   - Alias for USB-ready Windows package flow (outputs to `portable-win/`).
+- `npm run bundle:node:win`
+  - Creates `dist/miner-finder-v<version>-portable-win.zip` containing signed `node.exe`, app files, and launchers (`start.bat`, `run-from-usb.bat`) to avoid SmartScreen blocking on custom `.exe`.
 - `npm run test:project`
   - Full verification pipeline: syntax checks + API checks + UI clickthrough + executable build.
 
@@ -70,10 +72,11 @@ Open:
 
 ## Portable Windows Usage
 
-- Preferred artifact: `dist/miner-finder-v<version>-win.exe`
-- Typical run model: double-click the `.exe` from a user-writable folder (Desktop/Documents).
-- No Node.js install is required for the `.exe` build.
-- Admin rights are usually not required, but local policy controls (SmartScreen/AppLocker/Defender/firewall) can still block execution or network scanning.
+- Preferred artifact: `dist/miner-finder-v<version>-portable-win.zip`
+- Build with: `npm run bundle:node:win`
+- Extract the zip and run `start.bat` (or `run-from-usb.bat`).
+- No Node.js install is required on the target machine (runtime is included as official signed `node.exe`).
+- Admin rights are usually not required, but local policy controls (AppLocker/Defender/firewall) can still restrict execution or network scanning.
 
 ## USB Windows Usage
 

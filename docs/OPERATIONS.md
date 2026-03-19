@@ -29,6 +29,12 @@ Build Windows portable bundle:
 npm run bundle:portable:win
 ```
 
+Build Windows SmartScreen-friendly bundle (zip with official `node.exe`):
+
+```bash
+npm run bundle:node:win
+```
+
 ## Release / Checkpoint Flow
 
 1. Verify app runs and key paths work.
@@ -42,6 +48,12 @@ npm run build:minify
 
 ```bash
 npm run bundle:portable:win
+```
+
+2b. Build/update Windows zip bundle that avoids custom `.exe` distribution:
+
+```bash
+npm run bundle:node:win
 ```
 
 3. Review changes:
@@ -97,6 +109,7 @@ Artifacts:
 - `Scanner-<timestamp>.bundle` (full Git history snapshot)
 - `Scanner-<timestamp>.tar.gz` (working tree archive)
 - `portable-win/` (portable Windows distribution: `miner-finder.exe`, `start.bat`, `README.txt`)
+- `dist/miner-finder-v<version>-portable-win.zip` (portable Windows zip with official `node.exe`, launchers, and app files)
 
 ## Restore Procedures
 
