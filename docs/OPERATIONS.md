@@ -23,6 +23,12 @@ Build minified client artifact:
 npm run build:minify
 ```
 
+Build Windows portable bundle:
+
+```bash
+npm run bundle:portable:win
+```
+
 ## Release / Checkpoint Flow
 
 1. Verify app runs and key paths work.
@@ -30,6 +36,12 @@ npm run build:minify
 
 ```bash
 npm run build:minify
+```
+
+2a. Build/update Windows portable distribution folder:
+
+```bash
+npm run bundle:portable:win
 ```
 
 3. Review changes:
@@ -84,6 +96,7 @@ Artifacts:
 
 - `Scanner-<timestamp>.bundle` (full Git history snapshot)
 - `Scanner-<timestamp>.tar.gz` (working tree archive)
+- `portable-win/` (portable Windows distribution: `miner-finder.exe`, `start.bat`, `README.txt`)
 
 ## Restore Procedures
 

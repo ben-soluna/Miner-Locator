@@ -48,6 +48,9 @@ function setupDelegatedEventHandlers() {
             case 'reset-scan-concurrency':
                 resetScanConcurrencySetting();
                 break;
+            case 'reset-sidebar-width':
+                resetSidebarWidthSetting();
+                break;
             case 'clear-cached-miners':
                 clearCachedMinerData();
                 break;
@@ -56,6 +59,20 @@ function setupDelegatedEventHandlers() {
                 break;
             case 'close-modal':
                 closeModal();
+                break;
+            case 'export-table-csv': {
+                const viewId = actionEl.dataset.viewId || 'dashboardView';
+                openExportCsvModal(viewId);
+                break;
+            }
+            case 'confirm-export-csv':
+                confirmExportCsv();
+                break;
+            case 'select-all-export-csv':
+                selectAllExportCsvColumns();
+                break;
+            case 'close-export-csv-modal':
+                closeExportCsvModal();
                 break;
             case 'toggle-flag': {
                 const ip = actionEl.dataset.ip || '';
@@ -75,6 +92,12 @@ function setupDelegatedEventHandlers() {
                 if (rangeId) editSavedRange(rangeId);
                 break;
             }
+            case 'save-saved-range-edit':
+                saveSavedRangeEdit();
+                break;
+            case 'close-saved-range-edit':
+                closeSavedRangeEditModal();
+                break;
             case 'delete-saved-range': {
                 const rangeId = actionEl.dataset.rangeId;
                 if (rangeId) deleteSavedRange(rangeId);
@@ -108,10 +131,21 @@ function setupDelegatedEventHandlers() {
 
         if (target.id === 'scanConcurrencyInput') {
             handleScanConcurrencyInput();
+            return;
+        }
+
+        if (target.id === 'sidebarWidthInput' || target.id === 'sidebarWidthNumberInput') {
+            handleSidebarWidthInput(target.value);
         }
     });
 
     document.addEventListener('change', (event) => {
+        const exportCsvToggle = event.target.closest('[data-action="toggle-export-csv-column"]');
+        if (exportCsvToggle) {
+            setExportCsvColumnSelected(exportCsvToggle.dataset.index, exportCsvToggle.checked);
+            return;
+        }
+
         const checkbox = event.target.closest('[data-action="select-saved-range"]');
         if (!checkbox) return;
         selectSavedRange(checkbox.dataset.rangeId, checkbox.checked);
@@ -123,6 +157,29 @@ function setupDelegatedEventHandlers() {
         const itemId = handle.dataset.itemId;
         if (!itemId) return;
         beginSiteMapResize(event, itemId);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeSavedRangeEditModal();
+        closeExportCsvModal();
+        clearPendingSavedRangeDelete();
+        renderSavedRangesList();
+        closeModal();
+    });
+
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.id === 'savedRangeEditModal') {
+            closeSavedRangeEditModal();
+        }
+        if (target.id === 'exportCsvModal') {
+            closeExportCsvModal();
+        }
+        if (target.id === 'colModal') {
+            closeModal();
+        }
     });
 
     document.body.dataset.delegatedEventsBound = 'true';
@@ -145,5 +202,6 @@ window.onload = () => {
     updateRangeBuilderPreview();
     initScanConcurrencySetting();
     initSidebarResize();
+    initSidebarWidthSetting();
     // Site Map intentionally disabled for now.
 };

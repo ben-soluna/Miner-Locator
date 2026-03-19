@@ -334,9 +334,6 @@
             box-shadow: var(--container-shadow);
             padding: 20px;
         }
-        .ip-ranges-panel h3 {
-            margin: 0 0 6px;
-        }
         .ip-ranges-muted {
             margin: 0 0 16px;
             color: var(--status-color);
@@ -439,6 +436,16 @@
         .saved-action-icon:hover {
             background: var(--th-bg);
             color: var(--text-color);
+        }
+        .saved-action-icon.pending-clear {
+            background: #b91c1c;
+            border-color: #b91c1c;
+            color: #fff;
+        }
+        .saved-action-icon.pending-clear:hover {
+            background: #991b1b;
+            border-color: #991b1b;
+            color: #fff;
         }
         .saved-action-icon svg {
             width: 14px;
@@ -607,7 +614,18 @@
         body.edit-mode-active .sidebar {
             position: relative;
         }
-        .app-title { margin-top: 0; margin-bottom: 25px; font-size: 38px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(90deg, #ea580c, #f59e0b); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: inline-block; }
+        .app-title { margin-top: 0; margin-bottom: 18px; font-size: 38px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(90deg, #ea580c, #f59e0b); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: inline-block; }
+        .app-version-inline {
+            font-size: 13px;
+            letter-spacing: 0.04em;
+            font-weight: 700;
+            vertical-align: sub;
+            margin-left: 6px;
+            background: linear-gradient(90deg, #ea580c, #f59e0b);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
 
         /* --- Controls --- */
         .controls { display: flex; gap: 15px; margin-bottom: 0; align-items: center; flex-wrap: wrap; background: var(--th-bg); padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); justify-content: space-between; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
@@ -645,6 +663,7 @@
             background-color: var(--th-bg);
         }
         .table-tools { display: flex; justify-content: flex-start; margin: 0; padding: 10px 0; }
+        .table-export-btn { margin-left: auto; }
         .column-toolbox {
             padding: 0;
             border-radius: 4px;
@@ -860,6 +879,69 @@
         .col-item span.label-text { font-weight: 500; user-select: none; pointer-events: none; }
         .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; flex-shrink: 0; }
         .modal-overlay.is-open { display: flex; }
+        .export-col-list {
+            overflow-y: auto;
+            max-height: 320px;
+            border: 1px solid var(--table-border);
+            border-radius: 4px;
+            background: var(--container-bg);
+        }
+        .export-col-item {
+            display: grid;
+            grid-template-columns: 26px minmax(0, 1fr);
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--table-border);
+            cursor: grab;
+            user-select: none;
+            transition: padding 0.2s ease, height 0.2s ease, opacity 0.2s ease;
+        }
+        .export-col-item:active { cursor: grabbing; }
+        .export-col-item.collapsed-slot {
+            padding-top: 0;
+            padding-bottom: 0;
+            height: 0;
+            opacity: 0;
+            border-bottom: none;
+        }
+        .export-col-item.drag-over { padding-top: 38px; }
+        .export-col-item.export-col-dragging { opacity: 0.45; }
+        .export-col-item:last-child {
+            border-bottom: none;
+        }
+        .export-col-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: var(--text-color);
+        }
+        .export-col-toggle span {
+            user-select: none;
+            pointer-events: none;
+        }
+        .export-col-toggle input {
+            transform: scale(1.1);
+        }
+        #exportCsvSelectAllBtn {
+            align-self: flex-start;
+            padding: 6px 10px;
+            font-size: 12px;
+            line-height: 1.1;
+            min-height: 28px;
+            margin-bottom: 4px;
+        }
+        #exportCsvSelectAllBtn.is-deselect {
+            background: #ea580c;
+            border-color: #ea580c;
+            color: #ffffff;
+        }
+        #exportCsvSelectAllBtn.is-deselect:hover {
+            background: #c2410c;
+            border-color: #c2410c;
+            color: #ffffff;
+        }
 
         /* --- Quick-range layout --- */
         .section-row { display: flex; align-items: stretch; width: 100%; }
@@ -989,7 +1071,7 @@
         <!-- Dashboard view: scan controls + miner table -->
         <section id="dashboardView" class="view-panel active">
             <div class="container">
-                <h2 class="app-title">Miner-Finder</h2>
+                <h2 class="app-title">Miner-Finder<span class="app-version-inline">v0.2.2</span></h2>
                 
                 <div class="section-row">
                     <div class="section-col">
@@ -1015,6 +1097,7 @@
                         <button class="column-tool-label" type="button" data-action="open-modal" data-view-id="dashboardView" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
                     </div>
                     <button id="editModeToggleBtn" class="edit-mode-toggle" type="button" data-action="toggle-edit-mode" title="Toggle edit mode for sidebar and columns" aria-label="Toggle edit mode">Edit Mode</button>
+                    <button type="button" class="secondary table-export-btn" data-action="export-table-csv" data-view-id="dashboardView" title="Export current table" aria-label="Export current table">Export</button>
                 </div>
                 <div class="table-wrapper">
                     <table>
@@ -1031,9 +1114,8 @@
 
         <!-- IP range configuration and saved presets -->
         <section id="savedRangesView" class="view-panel">
+            <h2 class="app-title">IP Ranges</h2>
             <div class="ip-ranges-panel">
-                <h3>IP Ranges</h3>
-
                 <div class="range-config-grid">
                     <div class="range-field">
                         <label for="rangeTitleInput">Range Title</label>
@@ -1065,6 +1147,7 @@
                         <button class="column-tool-label" type="button" data-action="open-modal" data-view-id="flaggedMinersView" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
                     </div>
                     <button id="flaggedEditModeToggleBtn" class="edit-mode-toggle" type="button" data-action="toggle-edit-mode" title="Toggle edit mode for sidebar and columns" aria-label="Toggle edit mode">Edit Mode</button>
+                    <button type="button" class="secondary table-export-btn" data-action="export-table-csv" data-view-id="flaggedMinersView" title="Export current table" aria-label="Export current table">Export</button>
                 </div>
                 <div class="table-wrapper">
                     <table>
@@ -1095,8 +1178,15 @@
                     <input id="scanConcurrencyInput" type="number" min="1" max="128" step="1" value="48">
                 </div>
                 <p id="scanConcurrencyHint" class="hint-text">Higher is faster but can increase network load.</p>
+                <div class="range-field range-field-narrow">
+                    <label for="sidebarWidthInput">Sidebar Width</label>
+                    <input id="sidebarWidthInput" type="range" min="46" max="220" step="2" value="46">
+                    <input id="sidebarWidthNumberInput" type="number" min="46" max="220" step="2" value="46" aria-label="Sidebar width in pixels">
+                </div>
+                <p id="sidebarWidthHint" class="hint-text">Adjust navigation width. Labels auto-expand above 100px.</p>
                 <div class="range-actions range-actions-top">
                     <button type="button" class="secondary" data-action="reset-scan-concurrency">Reset to Default</button>
+                    <button type="button" class="secondary" data-action="reset-sidebar-width">Reset Sidebar Width</button>
                     <button type="button" class="secondary" data-action="clear-cached-miners">Clear Cached Miner Data</button>
                 </div>
                 <p id="minerCacheStatus" class="hint-text">Cache status: No cached miner data.</p>
@@ -1114,6 +1204,41 @@
         <div class="modal-footer">
             <button id="applyBtn" data-action="apply-columns" disabled>Apply</button>
             <button class="secondary" data-action="close-modal">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Saved-range edit modal -->
+<div class="modal-overlay" id="savedRangeEditModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="savedRangeEditTitle">
+        <h3 id="savedRangeEditTitle">Edit Saved IP Range</h3>
+        <p id="savedRangeEditHint" class="modal-hint">Update the title and range expression, then save.</p>
+        <div class="range-field">
+            <label for="savedRangeEditTitleInput">Range Title</label>
+            <input id="savedRangeEditTitleInput" type="text" placeholder="Description">
+        </div>
+        <div class="range-field" style="margin-top: 10px;">
+            <label for="savedRangeEditExpressionInput">IP Range</label>
+            <input id="savedRangeEditExpressionInput" type="text" placeholder="10.10.1.1-10.10.1.254">
+        </div>
+        <div class="modal-footer">
+            <button type="button" id="savedRangeEditSaveBtn" data-action="save-saved-range-edit">Save</button>
+            <button type="button" class="secondary" data-action="close-saved-range-edit">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Export CSV modal -->
+<div class="modal-overlay" id="exportCsvModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportCsvTitle">
+        <h3 id="exportCsvTitle">Export Table</h3>
+        <p class="modal-hint">Drag to reorder. Check to include in CSV export.</p>
+        <button type="button" id="exportCsvSelectAllBtn" class="secondary" data-action="select-all-export-csv">Select All</button>
+        <p id="exportCsvSelectionMeta" class="hint-text">0 columns selected.</p>
+        <div id="exportCsvList" class="export-col-list"></div>
+        <div class="modal-footer">
+            <button type="button" data-action="confirm-export-csv">Export</button>
+            <button type="button" class="secondary" data-action="close-export-csv-modal">Cancel</button>
         </div>
     </div>
 </div>

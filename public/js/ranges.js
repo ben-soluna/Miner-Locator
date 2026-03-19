@@ -1,5 +1,51 @@
 // --- Saved IP ranges manager ---
 
+let editingSavedRangeId = null;
+let pendingSavedRangeDeleteId = null;
+let pendingSavedRangeDeleteTimerId = null;
+
+function setSavedRangeEditHint(message, isError = false) {
+    const hint = getEl('savedRangeEditHint');
+    if (!hint) return;
+    hint.innerText = message;
+    hint.style.color = isError ? 'var(--error-color)' : 'var(--status-color)';
+}
+
+function closeSavedRangeEditModal() {
+    const modal = getEl('savedRangeEditModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    editingSavedRangeId = null;
+}
+
+function clearPendingSavedRangeDelete() {
+    pendingSavedRangeDeleteId = null;
+    if (pendingSavedRangeDeleteTimerId) {
+        clearTimeout(pendingSavedRangeDeleteTimerId);
+        pendingSavedRangeDeleteTimerId = null;
+    }
+}
+
+function openSavedRangeEditModal(item) {
+    const modal = getEl('savedRangeEditModal');
+    const titleInput = getEl('savedRangeEditTitleInput');
+    const expressionInput = getEl('savedRangeEditExpressionInput');
+    if (!modal || !titleInput || !expressionInput) return;
+
+    editingSavedRangeId = item.id;
+    titleInput.value = item.title;
+    expressionInput.value = item.expression;
+    setSavedRangeEditHint('Update the title and range expression, then save.');
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+
+    setTimeout(() => {
+        titleInput.focus();
+        titleInput.select();
+    }, 0);
+}
+
 function initSavedRangesManager() {
     const storedRanges = readStoredJson(savedRangesStorageKey, []);
     savedRanges = Array.isArray(storedRanges)
@@ -171,21 +217,34 @@ function selectSavedRange(rangeId, checked) {
 function editSavedRange(rangeId) {
     const item = savedRanges.find(r => r.id === rangeId);
     if (!item) return;
+    openSavedRangeEditModal(item);
+}
 
-    const nextTitle = prompt('Edit range title:', item.title);
-    if (nextTitle === null) return;
-    const title = nextTitle.trim();
-    if (!title) {
-        setStatus('Range title cannot be empty.', 'var(--error-color)');
+function saveSavedRangeEdit() {
+    if (!editingSavedRangeId) return;
+
+    const item = savedRanges.find(r => r.id === editingSavedRangeId);
+    if (!item) {
+        closeSavedRangeEditModal();
         return;
     }
 
-    const nextExpression = prompt('Edit IP range expression:', item.expression);
-    if (nextExpression === null) return;
-    const expression = nextExpression.trim();
+    const titleInput = getEl('savedRangeEditTitleInput');
+    const expressionInput = getEl('savedRangeEditExpressionInput');
+    if (!titleInput || !expressionInput) return;
+
+    const title = titleInput.value.trim();
+    if (!title) {
+        setSavedRangeEditHint('Range title cannot be empty.', true);
+        titleInput.focus();
+        return;
+    }
+
+    const expression = expressionInput.value.trim();
     const parsed = parseIPRangeInput(expression);
     if (parsed.error) {
-        setStatus(parsed.error, 'var(--error-color)');
+        setSavedRangeEditHint(parsed.error, true);
+        expressionInput.focus();
         return;
     }
 
@@ -195,17 +254,41 @@ function editSavedRange(rangeId) {
     persistSavedRanges();
     renderSavedRangesList();
 
-    if (selectedSavedRangeIds.includes(rangeId)) applySelectedRangesToScannerInput(false);
+    if (selectedSavedRangeIds.includes(editingSavedRangeId)) {
+        applySelectedRangesToScannerInput(false);
+    }
 
+    closeSavedRangeEditModal();
     setStatus(`Updated saved range: ${item.title}`, 'var(--success-color)');
 }
 
 function deleteSavedRange(rangeId) {
-    savedRanges = savedRanges.filter(r => r.id !== rangeId);
-    selectedSavedRangeIds = selectedSavedRangeIds.filter(id => id !== rangeId);
+    const item = savedRanges.find(r => r.id === rangeId);
+    if (!item) return;
+
+    if (pendingSavedRangeDeleteId !== rangeId) {
+        pendingSavedRangeDeleteId = rangeId;
+        if (pendingSavedRangeDeleteTimerId) clearTimeout(pendingSavedRangeDeleteTimerId);
+        pendingSavedRangeDeleteTimerId = setTimeout(() => {
+            pendingSavedRangeDeleteId = null;
+            pendingSavedRangeDeleteTimerId = null;
+            renderSavedRangesList();
+        }, 5000);
+        renderSavedRangesList();
+        setStatus(`Click delete again to confirm: ${item.title}`, 'var(--error-color)');
+        return;
+    }
+
+    savedRanges = savedRanges.filter(r => r.id !== pendingSavedRangeDeleteId);
+    selectedSavedRangeIds = selectedSavedRangeIds.filter(id => id !== pendingSavedRangeDeleteId);
     persistSavedRanges();
     renderSavedRangesList();
     applySelectedRangesToScannerInput(false);
+    clearPendingSavedRangeDelete();
+
+    if (item) {
+        setStatus(`Deleted saved range: ${item.title}`, 'var(--success-color)');
+    }
 }
 
 function renderSavedRangesList() {
@@ -240,7 +323,7 @@ function renderSavedRangesList() {
                         <path d="M12 6l4 4"></path>
                     </svg>
                 </button>
-                <button type="button" class="saved-action-icon" data-action="delete-saved-range" data-range-id="${item.id}" aria-label="Delete ${escapeHtml(item.title)}" title="Delete">
+                <button type="button" class="saved-action-icon ${pendingSavedRangeDeleteId === item.id ? 'pending-clear' : ''}" data-action="delete-saved-range" data-range-id="${item.id}" aria-label="Delete ${escapeHtml(item.title)}" title="${pendingSavedRangeDeleteId === item.id ? 'Click again to confirm delete' : 'Delete'}">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M3 6h18"></path>
                         <path d="M8 6V4h8v2"></path>

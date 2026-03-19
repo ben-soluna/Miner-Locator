@@ -1,5 +1,9 @@
 // --- Table rendering and sorting ---
 
+let exportCsvViewId = 'dashboardView';
+let exportCsvColumns = [];
+let exportCsvDragStartIndex = -1;
+
 function getSortedMinersList(miners) {
     const list = [...miners];
     list.sort((a, b) => {
@@ -19,6 +23,257 @@ function getSortedMinersList(miners) {
         return 0;
     });
     return list;
+}
+
+function getFlaggedMinersList() {
+    const minerByIp = new Map(minersData.map((item) => [String(item.ip || ''), item]));
+
+    return getSortedMinersList(
+        flaggedMinerIps.map((ip) => {
+            const miner = minerByIp.get(String(ip || ''));
+            if (miner) return miner;
+            return {
+                ip, status: 'online',
+                hostname: 'N/A', mac: 'N/A', ipMode: 'N/A', os: 'N/A', osVersion: 'N/A',
+                minerType: 'N/A', cbType: 'N/A', psuInfo: 'N/A', temp: 'N/A',
+                fans: 'N/A', fanStatus: 'N/A', voltage: 'N/A', frequencyMHz: 'N/A',
+                hashrate: 'N/A', activeHashboards: 'N/A', hashboards: 'N/A', pools: 'N/A'
+            };
+        })
+    );
+}
+
+function csvEscape(value) {
+    const text = String(value === undefined || value === null ? '' : value);
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
+function getExportCellValue(miner, colId) {
+    if (colId === 'status') return 'Online';
+    if (colId === 'hashrate') {
+        const hr = String(miner.hashrate || 'N/A').trim();
+        return hr && hr !== 'N/A' ? `${hr} TH/s` : 'N/A';
+    }
+    return String(miner[colId] || 'N/A');
+}
+
+function getExportRowsForView(viewId) {
+    if (viewId === 'flaggedMinersView') return getFlaggedMinersList();
+    return getSortedMinersList(minersData);
+}
+
+function openExportCsvModal(viewId = 'dashboardView') {
+    exportCsvViewId = viewId;
+    exportCsvColumns = getColumnsForView(viewId)
+        .filter(col => col.id !== 'flag')
+        .map(col => ({
+            id: col.id,
+            label: col.label,
+            selected: Boolean(col.visible)
+        }));
+
+    renderExportCsvList();
+
+    const modal = getEl('exportCsvModal');
+    if (!modal) return;
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeExportCsvModal() {
+    const modal = getEl('exportCsvModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function renderExportCsvList() {
+    const list = getEl('exportCsvList');
+    if (!list) return;
+
+    bindExportCsvListEvents(list);
+
+    list.innerHTML = exportCsvColumns.map((col, index) => {
+        const checked = col.selected ? 'checked' : '';
+
+        return `
+            <div class="export-col-item" draggable="true" data-export-col-index="${index}">
+                <span class="drag-handle" aria-hidden="true">☰</span>
+                <label class="export-col-toggle">
+                    <input type="checkbox" data-action="toggle-export-csv-column" data-index="${index}" ${checked}>
+                    <span>${escapeHtml(col.label)}</span>
+                </label>
+            </div>
+        `;
+    }).join('');
+
+    updateExportCsvSelectedCount();
+}
+
+function updateExportCsvSelectedCount() {
+    const meta = getEl('exportCsvSelectionMeta');
+    if (!meta) return;
+    const selectedCount = exportCsvColumns.filter(col => col.selected).length;
+    meta.innerText = `${selectedCount} column${selectedCount === 1 ? '' : 's'} selected.`;
+    updateExportCsvSelectAllButton();
+}
+
+function updateExportCsvSelectAllButton() {
+    const btn = getEl('exportCsvSelectAllBtn');
+    if (!btn) return;
+
+    const hasColumns = exportCsvColumns.length > 0;
+    const selectedCount = exportCsvColumns.filter(col => col.selected).length;
+    const allSelected = hasColumns && selectedCount === exportCsvColumns.length;
+
+    btn.innerText = allSelected ? 'Deselect All' : 'Select All';
+    btn.setAttribute('aria-label', allSelected ? 'Deselect all columns' : 'Select all columns');
+    btn.title = allSelected ? 'Deselect all columns' : 'Select all columns';
+    btn.classList.toggle('is-deselect', allSelected);
+}
+
+function bindExportCsvListEvents(list) {
+    if (list.dataset.eventsBound === 'true') return;
+
+    list.addEventListener('dragstart', (event) => {
+        const item = event.target.closest('.export-col-item[data-export-col-index]');
+        if (!item) return;
+        exportCsvDragStart(event, Number(item.dataset.exportColIndex));
+    });
+
+    list.addEventListener('dragover', (event) => {
+        const item = event.target.closest('.export-col-item[data-export-col-index]');
+        if (!item) return;
+        exportCsvDragOver(event);
+    });
+
+    list.addEventListener('dragenter', (event) => {
+        const item = event.target.closest('.export-col-item[data-export-col-index]');
+        if (!item) return;
+        exportCsvDragEnter(event, item);
+    });
+
+    list.addEventListener('dragleave', (event) => {
+        const item = event.target.closest('.export-col-item[data-export-col-index]');
+        if (!item) return;
+        exportCsvDragLeave(event, item);
+    });
+
+    list.addEventListener('drop', (event) => {
+        const item = event.target.closest('.export-col-item[data-export-col-index]');
+        if (!item) return;
+        exportCsvDrop(event, Number(item.dataset.exportColIndex));
+    });
+
+    list.addEventListener('dragend', (event) => {
+        const item = event.target.closest('.export-col-item[data-export-col-index]');
+        if (!item) return;
+        exportCsvDragEnd(event);
+    });
+
+    list.dataset.eventsBound = 'true';
+}
+
+function setExportCsvColumnSelected(index, selected) {
+    const idx = Number(index);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= exportCsvColumns.length) return;
+    exportCsvColumns[idx].selected = Boolean(selected);
+    updateExportCsvSelectedCount();
+}
+
+function selectAllExportCsvColumns() {
+    const allSelected = exportCsvColumns.length > 0 && exportCsvColumns.every(col => col.selected);
+    exportCsvColumns.forEach((col) => {
+        col.selected = !allSelected;
+    });
+    renderExportCsvList();
+}
+
+function exportCsvDragStart(event, index) {
+    exportCsvDragStartIndex = index;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    setTimeout(() => {
+        event.target.classList.add('collapsed-slot');
+        event.target.classList.add('export-col-dragging');
+    }, 0);
+}
+
+function exportCsvDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+}
+
+function exportCsvDragEnter(event, item) {
+    event.preventDefault();
+    item.classList.add('drag-over');
+}
+
+function exportCsvDragLeave(event, item) {
+    if (!item.contains(event.relatedTarget)) {
+        item.classList.remove('drag-over');
+    }
+}
+
+function exportCsvDrop(event, dropIndex) {
+    event.preventDefault();
+    const dropTarget = event.target.closest('.export-col-item');
+    if (dropTarget) dropTarget.classList.remove('drag-over');
+    if (exportCsvDragStartIndex === dropIndex || exportCsvDragStartIndex < 0) return;
+
+    const [item] = exportCsvColumns.splice(exportCsvDragStartIndex, 1);
+    exportCsvColumns.splice(dropIndex, 0, item);
+    renderExportCsvList();
+}
+
+function exportCsvDragEnd(event) {
+    exportCsvDragStartIndex = -1;
+    event.target.classList.remove('collapsed-slot');
+    event.target.classList.remove('export-col-dragging');
+    document.querySelectorAll('.export-col-item').forEach(el => el.classList.remove('drag-over'));
+}
+
+function confirmExportCsv() {
+    const selectedColumns = exportCsvColumns.filter(col => col.selected);
+    exportTableCsv(exportCsvViewId, selectedColumns);
+    closeExportCsvModal();
+}
+
+function exportTableCsv(viewId = 'dashboardView', selectedColumns = null) {
+    const rows = getExportRowsForView(viewId);
+    const columns = Array.isArray(selectedColumns)
+        ? selectedColumns
+        : getColumnsForView(viewId)
+            .filter(col => col.visible && col.id !== 'flag')
+            .map(col => ({ id: col.id, label: col.label }));
+
+    if (!columns.length) {
+        setStatus('No visible data columns to export.', 'var(--error-color)');
+        return;
+    }
+
+    const headerLine = columns.map(col => csvEscape(col.label)).join(',');
+    const dataLines = rows.map((miner) => {
+        return columns
+            .map(col => csvEscape(getExportCellValue(miner, col.id)))
+            .join(',');
+    });
+
+    const csv = [headerLine, ...dataLines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const prefix = viewId === 'flaggedMinersView' ? 'flagged-miners' : 'miners';
+
+    link.href = url;
+    link.download = `${prefix}-${stamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setStatus(`Exported ${rows.length} row${rows.length === 1 ? '' : 's'} to CSV.`, 'var(--success-color)');
 }
 
 function renderTableBody(bodyId, miners, viewId) {
@@ -95,21 +350,7 @@ function renderTableBody(bodyId, miners, viewId) {
 function renderTable() {
     renderTableBody('minerTableBody', getSortedMinersList(minersData), 'dashboardView');
 
-    const minerByIp = new Map(minersData.map((item) => [String(item.ip || ''), item]));
-
-    const flaggedMiners = getSortedMinersList(
-        flaggedMinerIps.map((ip) => {
-            const miner = minerByIp.get(String(ip || ''));
-            if (miner) return miner;
-            return {
-                ip, status: 'online',
-                hostname: 'N/A', mac: 'N/A', ipMode: 'N/A', os: 'N/A', osVersion: 'N/A',
-                minerType: 'N/A', cbType: 'N/A', psuInfo: 'N/A', temp: 'N/A',
-                fans: 'N/A', fanStatus: 'N/A', voltage: 'N/A', frequencyMHz: 'N/A',
-                hashrate: 'N/A', activeHashboards: 'N/A', hashboards: 'N/A', pools: 'N/A'
-            };
-        })
-    );
+    const flaggedMiners = getFlaggedMinersList();
     renderTableBody('flaggedMinerTableBody', flaggedMiners, 'flaggedMinersView');
 }
 

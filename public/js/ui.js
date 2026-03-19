@@ -6,6 +6,12 @@ function clampScanConcurrency(value) {
     return Math.max(minScanConcurrency, Math.min(maxScanConcurrency, parsed));
 }
 
+function clampSidebarWidth(value) {
+    const parsed = parseInt(String(value), 10);
+    if (!Number.isFinite(parsed)) return defaultSidebarWidth;
+    return Math.max(minSidebarWidth, Math.min(maxSidebarWidth, parsed));
+}
+
 function updateScanConcurrencyHint() {
     const hint = getEl('scanConcurrencyHint');
     if (!hint) return;
@@ -100,6 +106,34 @@ function initSidebarResize() {
     document.addEventListener('mouseup', endSidebarResize);
 }
 
+function getCurrentSidebarWidth() {
+    const fromCss = parseFloat(getCSSVariableValue('--sidebar-width'));
+    if (Number.isFinite(fromCss)) return clampSidebarWidth(fromCss);
+    return defaultSidebarWidth;
+}
+
+function updateSidebarWidthHint(width) {
+    const hint = getEl('sidebarWidthHint');
+    if (!hint) return;
+
+    const mode = width > expandThreshold ? 'Expanded labels' : 'Icon rail';
+    hint.innerText = `Current: ${Math.round(width)}px (${mode}). Labels auto-expand above ${expandThreshold}px.`;
+}
+
+function syncSidebarWidthInputs(width) {
+    const slider = getEl('sidebarWidthInput');
+    const numberInput = getEl('sidebarWidthNumberInput');
+    const rounded = String(Math.round(width));
+    if (slider) slider.value = rounded;
+    if (numberInput) numberInput.value = rounded;
+    updateSidebarWidthHint(width);
+}
+
+function initSidebarWidthSetting() {
+    const width = getCurrentSidebarWidth();
+    syncSidebarWidthInputs(width);
+}
+
 function loadSidebarWidth() {
     try {
         const stored = localStorage.getItem(sidebarWidthStorageKey);
@@ -113,12 +147,14 @@ function loadSidebarWidth() {
 }
 
 function setSidebarWidth(width) {
-    document.documentElement.style.setProperty('--sidebar-width', width + 'px');
-    if (width > expandThreshold) {
+    const clamped = clampSidebarWidth(width);
+    document.documentElement.style.setProperty('--sidebar-width', clamped + 'px');
+    if (clamped > expandThreshold) {
         document.body.classList.add('sidebar-expanded');
     } else {
         document.body.classList.remove('sidebar-expanded');
     }
+    syncSidebarWidthInputs(clamped);
 }
 
 function persistSidebarWidth() {
@@ -126,6 +162,17 @@ function persistSidebarWidth() {
     if (currentWidth) {
         localStorage.setItem(sidebarWidthStorageKey, currentWidth);
     }
+}
+
+function handleSidebarWidthInput(value) {
+    const width = clampSidebarWidth(value);
+    setSidebarWidth(width);
+    persistSidebarWidth();
+}
+
+function resetSidebarWidthSetting() {
+    setSidebarWidth(defaultSidebarWidth);
+    persistSidebarWidth();
 }
 
 function getCSSVariableValue(varName) {

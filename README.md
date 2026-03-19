@@ -10,7 +10,7 @@ Lightweight miner network scanner with a browser UI and real-time scan results o
 - Home tab scanning: active
 - IP Ranges management: active (saved ranges, multi-select, combined expressions)
 - Site Map: intentionally disabled — pending redesign
-- Sidebar resize control in Settings: planned
+- Sidebar resize control in Settings: active
 
 ## Roadmap Snapshot
 
@@ -18,7 +18,6 @@ Source of truth: `public/TODO.md`
 
 Frontend next:
 
-- Add a Settings control to resize the sidebar width.
 - Reintroduce a production-ready Site Map view after redesign.
 
 Backend (incomplete):
@@ -54,6 +53,12 @@ Open:
   - Runs the UI clickthrough test against a running server (or starts one automatically).
 - `npm run build:exe`
   - Builds an OS-native executable into `dist/` (`linux` on Linux, `win.exe` on Windows).
+- `npm run build:exe:win`
+  - Builds a Windows portable executable into `dist/` from any OS when supported by `pkg`.
+- `npm run bundle:portable:win`
+  - Creates a shareable `portable-win/` folder with `miner-finder.exe`, `start.bat`, and `README.txt`.
+- `npm run bundle:usb:win`
+  - Alias for USB-ready Windows package flow (outputs to `portable-win/`).
 - `npm run test:project`
   - Full verification pipeline: syntax checks + API checks + UI clickthrough + executable build.
 
@@ -62,6 +67,20 @@ Open:
 - Full project checks run on both Linux and Windows via GitHub Actions:
   - `.github/workflows/full-project.yml`
 - Push or open a PR to execute the same `npm run test:project` pipeline on `windows-latest`.
+
+## Portable Windows Usage
+
+- Preferred artifact: `dist/miner-finder-v<version>-win.exe`
+- Typical run model: double-click the `.exe` from a user-writable folder (Desktop/Documents).
+- No Node.js install is required for the `.exe` build.
+- Admin rights are usually not required, but local policy controls (SmartScreen/AppLocker/Defender/firewall) can still block execution or network scanning.
+
+## USB Windows Usage
+
+- Build package: `npm run bundle:usb:win`
+- Copy `portable-win/` to USB.
+- On target Windows machine, run `portable-win/run-from-usb.bat`.
+- If USB execution is blocked by endpoint policy, copy the folder locally and run `portable-win/start.bat`.
 
 ## Project Structure
 

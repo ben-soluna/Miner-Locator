@@ -43,7 +43,21 @@
 - [x] Keep Edit Columns toolbar fixed during horizontal table scroll
 - [x] A way to save IP ranges with a Title for each range
 - [x] Build IP Ranges tab with subnet host-range builder and direct CIDR/range entry
-- [ ] Add a Settings control to resize the sidebar width
+- [x] Add a Settings control to resize the sidebar width
+- [x] Replace IP range edit browser prompts with an in-app modal matching UI style
+- [x] Change IP range delete to two-step in-row confirmation (click delete twice within timeout)
+- [x] Show current app version under the Miner-Finder title on Home tab
+- [x] Align IP Ranges tab header with shared gradient title styling (`app-title`)
+- [x] Move IP Ranges title above the main panel box (outside `ip-ranges-panel`)
+- [x] Add `Export CSV` action for Home and Flagged miner tables
+- [x] Add export popup to choose CSV columns and order before download
+- [x] Make export popup column ordering drag-and-drop like Edit Columns
+- [x] Show live selected-column count in export popup
+- [x] Add Select All action in export popup
+- [x] Move export Select All above count and toggle label to Deselect All when fully selected
+- [x] Make export Select All control compact and pinned left
+- [x] Add distinct color styling for Deselect All vs Select All visibility states
+- [x] Add USB-first Windows launcher and docs for no-install portable execution
 - [ ] Create a site map view
 
 ## Backend
@@ -59,6 +73,7 @@
 - [ ] Map `Hashboard Number` from `devs` call `STATUS[0].Msg` format (for example, `"3 ASC(s)"` means 3 active hashboards).
 
 ## Other
+- [x] Add Windows portable distribution workflow (`npm run bundle:portable:win`) to generate `portable-win/` with launcher docs.
 - [ ] //TODO function and VS Code Extensions
 
 ## Security and Optimization Findings (2026-03-18)
