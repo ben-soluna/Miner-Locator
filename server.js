@@ -51,6 +51,60 @@ function intToIp(int) {
     return [ (int >>> 24) & 255, (int >>> 16) & 255, (int >>> 8) & 255, int & 255 ].join('.');
 }
 
+function parseOctetToken(token) {
+    const text = String(token || '').trim();
+    if (!text) return null;
+
+    if (!text.includes('-')) {
+        const value = parseInt(text, 10);
+        if (!Number.isInteger(value) || value < 0 || value > 255) return null;
+        return { start: value, end: value };
+    }
+
+    const [startText, endText] = text.split('-').map(v => v.trim());
+    if (!startText || !endText) return null;
+
+    const start = parseInt(startText, 10);
+    const end = parseInt(endText, 10);
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+    if (start < 0 || start > 255 || end < 0 || end > 255 || start > end) return null;
+
+    return { start, end };
+}
+
+function parsePerOctetRange(part) {
+    const octetTokens = String(part || '').split('.').map(v => v.trim());
+    if (octetTokens.length !== 4) return { error: `Invalid range: ${part}` };
+
+    const octets = octetTokens.map(parseOctetToken);
+    if (octets.some(o => !o)) return { error: `Invalid range: ${part}` };
+
+    const hasOctetRange = octets.some(o => o.start !== o.end);
+    if (!hasOctetRange) {
+        const single = ipToInt(octetTokens.join('.'));
+        if (Number.isNaN(single)) return { error: `Invalid IP: ${part}` };
+        return { ranges: [{ start: single, end: single }] };
+    }
+
+    const total = octets.reduce((sum, octet) => sum * (octet.end - octet.start + 1), 1);
+    if (total > MAX_IPS_PER_SCAN) {
+        return { error: `Range too large. Limit is ${MAX_IPS_PER_SCAN} IPs.` };
+    }
+
+    const ranges = [];
+    for (let a = octets[0].start; a <= octets[0].end; a += 1) {
+        for (let b = octets[1].start; b <= octets[1].end; b += 1) {
+            for (let c = octets[2].start; c <= octets[2].end; c += 1) {
+                const start = (((a << 24) >>> 0) + (b << 16) + (c << 8) + octets[3].start) >>> 0;
+                const end = (((a << 24) >>> 0) + (b << 16) + (c << 8) + octets[3].end) >>> 0;
+                ranges.push({ start, end });
+            }
+        }
+    }
+
+    return { ranges };
+}
+
 function parseRangeExpression(expression) {
     const input = String(expression || '').trim();
     if (!input) return { error: 'Range is required.' };
@@ -77,10 +131,10 @@ function parseRangeExpression(expression) {
             continue;
         }
 
-        if (part.includes('-')) {
-            const [startIp, endIp] = part.split('-').map(x => x.trim());
-            const start = ipToInt(startIp);
-            const end = ipToInt(endIp);
+        const fullRangeMatch = part.match(/^(\d{1,3}(?:\.\d{1,3}){3})\s*-\s*(\d{1,3}(?:\.\d{1,3}){3})$/);
+        if (fullRangeMatch) {
+            const start = ipToInt(fullRangeMatch[1]);
+            const end = ipToInt(fullRangeMatch[2]);
 
             if (Number.isNaN(start) || Number.isNaN(end)) {
                 return { error: `Invalid range: ${part}` };
@@ -90,6 +144,13 @@ function parseRangeExpression(expression) {
             }
 
             ranges.push({ start, end });
+            continue;
+        }
+
+        if (part.includes('-')) {
+            const parsedPerOctet = parsePerOctetRange(part);
+            if (parsedPerOctet.error) return parsedPerOctet;
+            ranges.push(...parsedPerOctet.ranges);
             continue;
         }
 
@@ -216,7 +277,18 @@ async function requestMinerCommands(ip, commands) {
     const joined = list.join('+');
     const response = await requestMinerCommand(ip, joined);
     if (response && typeof response === 'object') {
-        return response;
+        const responseKeys = new Set(Object.keys(response).map(key => String(key).toLowerCase()));
+        const hasAnyRequestedPayload = list.some(cmd => responseKeys.has(String(cmd).toLowerCase()));
+        const statusList = Array.isArray(response.STATUS) ? response.STATUS : [];
+        const hasInvalidCommandStatus = statusList.some((entry) => {
+            const status = String((entry && entry.STATUS) || '').toUpperCase();
+            const msg = String((entry && entry.Msg) || '').toLowerCase();
+            return status === 'E' || msg.includes('invalid command');
+        });
+
+        if (hasAnyRequestedPayload && !hasInvalidCommandStatus) {
+            return response;
+        }
     }
 
     // Fallback for non-join-capable firmware variants.
@@ -793,12 +865,14 @@ function deriveProfile(ip, payloads) {
     const devs = sectionArray(payloads.devs, ['devs']);
     const configRecords = sectionArray(payloads.config, ['config']);
 
+    const devdetailsRecords = sectionArray(payloads.devdetails, ['devdetails']);
+
     // Strict-source mapping: Miner Type is only sourced from STATS.Type.
     // If STATS does not provide it, return N/A.
     const statsRecordsForType = sectionArray(payloads.stats, ['stats']);
     const minerType = pickFieldFromRecords(statsRecordsForType, ['type']) || 'N/A';
 
-    const controlBoard = normalizeControlBoard(statsRecords);
+    const controlBoard = normalizeControlBoard(configRecords);
 
     const osType = normalizeFirmware(versionRecords);
 
@@ -814,13 +888,13 @@ function deriveProfile(ip, payloads) {
     const temperatureC = deriveTempC(statsRecords);
     const fans = deriveFanSummary(statsRecords);
     const fanStatus = deriveFanStatus(statsRecords);
-    const voltage = deriveVoltage(statsRecords);
+    const voltage = deriveVoltage(devdetailsRecords);
     const frequencyMHz = deriveFrequencyMHz(statsRecords);
     const pools = derivePoolString(payloads.pools);
     const hashboardData = deriveHashboards(statsRecords);
 
     const psuInfo =
-        pickFieldFromRecords(statsRecords, ['psu', 'powermode', 'power mode', 'powertype', 'power type', 'powerlimit']) ||
+        pickFieldFromRecords(configRecords, ['psulabel', 'psu label', 'psu_label', 'psuid', 'psumodel', 'psu model']) ||
         'N/A';
 
     const ipModeRaw = pickFieldFromRecords(configRecords, [
@@ -894,7 +968,7 @@ async function enrichMissingFields(profile) {
     // Antminer CGI endpoints (get_system_info.cgi, get_network_info.cgi) only help for
     // Bitmain stock firmware. Braiins OS and LuxOS use a different HTTP API entirely,
     // so attempting these endpoints wastes a full request timeout per miner.
-    // controlBoard, voltage and psuInfo come from CGMiner stats — the CGI won't have them.
+    // controlBoard and psuInfo come from CGMiner config command; voltage comes from CGMiner stats — the CGI won't have them.
     const isKnownNonBitmain = enriched.osType === 'Braiins OS' || enriched.osType === 'LuxOS';
     const needsHttpHints =
         !isKnownNonBitmain && (
@@ -912,9 +986,6 @@ async function enrichMissingFields(profile) {
             const mac = pickField(httpHints, ['macaddr', 'mac', 'ethmac']);
             const fw = pickField(httpHints, ['firmwareversion', 'fwversion', 'systemversion', 'version']);
             const os = pickField(httpHints, ['os', 'platform', 'system', 'miner_type']);
-            const psu = pickField(httpHints, ['psu', 'powermode', 'power mode', 'power', 'power_mode']);
-            const ctrl = pickField(httpHints, ['controlboard', 'control_board', 'ctrl_board', 'boardtype']);
-            const volt = pickField(httpHints, ['voltage', 'volt', 'vcore']);
             const ipModeRaw = pickField(httpHints, ['dhcp', 'dhcpstatus', 'dhcp4', 'usedhcp', 'ipmode', 'networkmode', 'bootproto', 'protocol']);
 
             if (isMissing(enriched.hostname) && !isMissing(host)) enriched.hostname = String(host);
@@ -929,16 +1000,10 @@ async function enrichMissingFields(profile) {
                 enriched.osType = String(os);
                 enriched.os = String(os);
             }
-            if (isMissing(enriched.psuInfo) && !isMissing(psu)) enriched.psuInfo = String(psu);
-            if (isMissing(enriched.controlBoard) && !isMissing(ctrl)) {
-                enriched.controlBoard = String(ctrl);
-                enriched.cbType = String(ctrl);
-            }
-            if (isMissing(enriched.voltage) && !isMissing(volt)) enriched.voltage = formatMaybeNumber(volt, 2);
-            if (isMissing(enriched.ipMode)) {
-                const mode = normalizeIpMode(ipModeRaw);
-                if (!isMissing(mode)) enriched.ipMode = mode;
-            }
+            // psuInfo: CGMiner config command (PSULabel) is the sole source; HTTP hints are not used.
+            // controlBoard/cbType: CGMiner config command is the sole source; HTTP hints are not used.
+            // voltage: CGMiner devdetails (DEVDETAILS.Voltage) is the sole source; HTTP hints are not used.
+            // ipMode: CGMiner config command is the sole source; HTTP hints are not used for ipMode.
         }
     }
 
@@ -973,7 +1038,10 @@ async function checkMinerDetailed(ip) {
     // Strict-source mapping: only fields sourced from CONFIG justify extra commands.
     const needsExtra =
         isMissing(base.mac) ||
-        isMissing(base.ipMode);
+        isMissing(base.ipMode) ||
+        isMissing(base.cbType) ||
+        isMissing(base.psuInfo) ||
+        isMissing(base.voltage);
 
     if (needsExtra) {
         const extraPayloads = await requestMinerCommands(ip, ['edevs', 'config', 'devdetails']);

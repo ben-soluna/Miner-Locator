@@ -58,6 +58,7 @@
 - [x] Make export Select All control compact and pinned left
 - [x] Add distinct color styling for Deselect All vs Select All visibility states
 - [x] Add USB-first Windows launcher and docs for no-install portable execution
+- [ ] Add Select All / Deselect All controls on the IP Ranges page
 - [ ] Create a site map view
 
 ## Backend
@@ -67,10 +68,12 @@
 - [x] Add lightweight fallback enrichment for **MAC Address**, **OS**, and **Hostname** (ARP cache + reverse DNS + best-effort HTTP hints).
 - [x] Implement CGMiner joined-command queries (`summary+stats+pools+version+devs`) to reduce per-host TCP round-trips from 5 to 1.
 - [x] Add `requestMinerCommands()` helper with join + per-command fallback for older firmware.
+- [x] Fix joined-command fallback detection so `Invalid command` responses auto-retry per-command instead of marking miners offline.
 - [x] Defer `devdetails` / `edevs` / `config` to a conditional extra pass (only when fields are still missing after base pass).
 - [x] Add `MINER_API_TIMEOUT_MS` env variable (default 1200 ms, min 200 ms).
 - [x] Add `client.setNoDelay(true)` to reduce TCP Nagle latency on miner connections.
 - [ ] Map `Hashboard Number` from `devs` call `STATUS[0].Msg` format (for example, `"3 ASC(s)"` means 3 active hashboards).
+- [ ] Diagnose and fix scan failures specific to Antminer S21 XP models.
 
 ## Other
 - [x] Add Windows portable distribution workflow (`npm run bundle:portable:win`) to generate `portable-win/` with launcher docs.
@@ -88,20 +91,20 @@
 
 ## Column Data-Link Review (One By One)
 - Rule: use only the explicitly assigned miner API call(s) per column; if absent, keep `N/A` (no cross-call or HTTP/ARP/DNS fallback fill-ins).
-- [ ] `ip` column: verify mapping from backend `result.ip` to frontend `miner.ip` and link rendering.
-- [ ] `status` column: confirm current hardcoded `Online` behavior vs backend `status` field.
+- [x] `ip` column: backend `intToIp()` string → `deriveProfile` `ip` field → SSE JSON → `normalizeMinerRecord` passthrough → `escapeHtml` on both display text and href → `<a>` link with `target="_blank" rel="noopener noreferrer"`. Sorting uses `ipToNum()` (numeric, not lexicographic). `.0`/`.255` skipped at scan loop. Verified correct and XSS-safe.
+- [x] `status` column: backend `deriveProfile()` always sets `status: 'online'`; frontend hardcodes `<td class="online">Online</td>` — frontend value never reads from backend field, both always agree. Correct: only responding miners are inserted into the table, so Online is always true. No dynamic display needed.
 - [x] `hostname` column: removed from table/column manager as redundant with IP Address column.
 - [x] `mac` column: backend source is `config[0].CONFIG[0].MACAddr` only; if missing/invalid, value stays `N/A`; frontend displays backend `mac` value.
-- [ ] `ipMode` column: verify backend normalization (`DHCP`/`Static`) and frontend display.
-- [ ] `os` column: verify backend aliasing (`osType` to `os`) and frontend fallback behavior.
-- [ ] `osVersion` column: verify backend source keys and frontend display.
+- [x] `ipMode` column: backend reads from CGMiner `config` command via `pickFieldFromRecords` (keys: `dhcp`, `dhcpstatus`, `dhcp4`, `usedhcp`, `ipmode`, etc.) → `normalizeIpMode()` → `'DHCP'` / `'Static'` / `'N/A'`; no HTTP fallback (removed); frontend `normalizeMinerRecord` passthrough → `escapeHtml` generic else branch. Verified correct.
+- [x] `os` column: backend source is `normalizeFirmware(versionRecords)` (CGMiner `version` command) → `'Braiins OS'` / `'LuxOS'` / brand string / `'N/A'`; aliased as both `osType` and `os` in `deriveProfile()`; frontend `normalizeMinerRecord` passthrough → `escapeHtml` generic else branch. Verified correct.
+- [x] `osVersion` column: backend source is `pickFieldFromRecords(versionRecords, ['api', 'fwversion', 'osversion', 'firmwareversion', 'version', 'compiletime'])` (CGMiner `version` command); frontend `normalizeMinerRecord` passthrough → `escapeHtml` generic else branch. Verified correct.
 - [x] `minerType` column: backend source is `stats[].Type` only in `deriveProfile()`; if missing, value stays `N/A`; frontend displays `miner.minerType`.
-- [ ] `cbType` column: verify backend control-board derivation and alias mapping.
-- [ ] `psuInfo` column: verify backend field extraction and frontend display.
-- [x] `temp` column: backend source is `stats[0].STATS[1].temp_max` (strict priority), else `N/A`; frontend displays backend `temp` value.
-- [ ] `fans` column: verify backend fan-speed aggregation and frontend display.
-- [ ] `fanStatus` column: verify backend active/total derivation and frontend alert styling.
-- [ ] `voltage` column: verify backend derivation and frontend display.
+- [x] `cbType` column: backend source is `config[0].CONFIG[0].ControlBoardType` only via `normalizeControlBoard(configRecords)` → `'CVTek'` / `'Amlogic'` / `'BeagleBone'` / `'N/A'`; aliased as both `controlBoard` and `cbType` in `deriveProfile()`; no HTTP fallback (removed); frontend `normalizeMinerRecord` passthrough → `escapeHtml` generic else branch. Verified correct.
+	- [x] `psuInfo` column: backend source is `config[0].CONFIG[0].PSULabel` only; no HTTP fallback; frontend `normalizeMinerRecord` passthrough → `escapeHtml`. Verified correct (`APW121417b` on S19s).
+- [x] `temp` column: backend source is `stats[0].STATS[1].temp_max` (strict priority), else averages all `temp*` keys from statsRecords; frontend `normalizeMinerRecord` passthrough → `escapeHtml` generic else branch. Verified correct on S19s (48–49°C). S21 XP reports `temp_max: 0` — firmware limitation, not a code bug.
+- [x] `fans` column: backend aggregates all `fan1`/`fan2`/... RPM values > 0 from statsRecords via `deriveFanSummary()`, joined with `/`; frontend `normalizeMinerRecord` passthrough → `escapeHtml` generic else branch. Verified correct on S19s.
+- [x] `fanStatus` column: backend counts explicit `fanN` slot keys from statsRecords via `deriveFanStatus()`; running = slots > 0 RPM, total = all slots → `"running/total"` string; frontend special-cased to add `class="fan-alert"` when running < total. Verified correct (e.g. `3/4` triggers alert when one fan is dead).
+	- [ ] `voltage` column: backend source is `devdetails[0].DEVDETAILS[N].Voltage` averaged via `deriveVoltage(devdetailsRecords)`; no HTTP fallback; frontend `normalizeMinerRecord` passthrough → `escapeHtml`.
 - [ ] `frequencyMHz` column: verify backend derivation and frontend display.
 - [ ] `hashrate` column: verify backend TH/s derivation plus frontend summary fallback path.
 - [ ] `activeHashboards` column: verify backend derivation and frontend display; source rule is `devs` call `STATUS[0].Msg` (for example, `"3 ASC(s)"` means 3 active hashboards).

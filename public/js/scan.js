@@ -1,5 +1,65 @@
 // --- IP range parsing, validation, scan control, range builder ---
 
+const MAX_IPS_PER_SCAN = 65536;
+
+function parseOctetToken(token) {
+    const text = String(token || '').trim();
+    if (!text) return null;
+
+    if (!text.includes('-')) {
+        const value = parseInt(text, 10);
+        if (!Number.isInteger(value) || value < 0 || value > 255) return null;
+        return { start: value, end: value };
+    }
+
+    const [startText, endText] = text.split('-').map(v => v.trim());
+    if (!startText || !endText) return null;
+
+    const start = parseInt(startText, 10);
+    const end = parseInt(endText, 10);
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+    if (start < 0 || start > 255 || end < 0 || end > 255 || start > end) return null;
+
+    return { start, end };
+}
+
+function expandOctetRanges(part) {
+    const octetTokens = String(part || '').split('.').map(v => v.trim());
+    if (octetTokens.length !== 4) return { error: `Invalid range entry: ${part}` };
+
+    const octets = octetTokens.map(parseOctetToken);
+    if (octets.some(o => !o)) return { error: `Invalid range entry: ${part}` };
+
+    const hasOctetRange = octets.some(o => o.start !== o.end);
+    if (!hasOctetRange) {
+        const ip = octetTokens.join('.');
+        const value = ipToNum(ip);
+        if (isNaN(value)) return { error: `Invalid entry: ${part}` };
+        return { ranges: [{ start: value, end: value }] };
+    }
+
+    const total = octets.reduce((acc, o) => acc * (o.end - o.start + 1), 1);
+    if (total > MAX_IPS_PER_SCAN) {
+        return { error: `Range too large. Limit is ${MAX_IPS_PER_SCAN} IPs.` };
+    }
+
+    const ranges = [];
+    for (let a = octets[0].start; a <= octets[0].end; a += 1) {
+        for (let b = octets[1].start; b <= octets[1].end; b += 1) {
+            for (let c = octets[2].start; c <= octets[2].end; c += 1) {
+                const start = ipToNum(`${a}.${b}.${c}.${octets[3].start}`);
+                const end = ipToNum(`${a}.${b}.${c}.${octets[3].end}`);
+                if (isNaN(start) || isNaN(end) || start > end) {
+                    return { error: `Invalid range entry: ${part}` };
+                }
+                ranges.push({ start, end });
+            }
+        }
+    }
+
+    return { ranges };
+}
+
 // Parse input supporting: single IP, dash ranges, comma-separated ranges, CIDR
 function parseIPRangeInput(input) {
     if (!input || !input.trim()) return { error: 'Empty range' };
@@ -20,15 +80,22 @@ function parseIPRangeInput(input) {
             continue;
         }
 
-        // Dash range
-        if (part.includes('-')) {
-            const [a, b] = part.split('-').map(s => s.trim());
-            if (!a || !b) return { error: `Invalid range: ${part}` };
-            const start = ipToNum(a);
-            const end = ipToNum(b);
+        // Full IP-to-IP dash range
+        const fullRangeMatch = part.match(/^(\d{1,3}(?:\.\d{1,3}){3})\s*-\s*(\d{1,3}(?:\.\d{1,3}){3})$/);
+        if (fullRangeMatch) {
+            const start = ipToNum(fullRangeMatch[1]);
+            const end = ipToNum(fullRangeMatch[2]);
             if (isNaN(start) || isNaN(end)) return { error: `Invalid range entry: ${part}` };
             if (start > end) return { error: `Start > end in range: ${part}` };
             ranges.push({ start, end });
+            continue;
+        }
+
+        // Per-octet range shorthand, e.g. 10.31-39.1.1-255
+        if (part.includes('-')) {
+            const expanded = expandOctetRanges(part);
+            if (expanded.error) return expanded;
+            ranges.push(...expanded.ranges);
             continue;
         }
 
@@ -38,7 +105,18 @@ function parseIPRangeInput(input) {
         ranges.push({ start: v, end: v });
     }
 
-    return { ranges };
+    ranges.sort((a, b) => a.start - b.start);
+    const merged = [];
+    for (const range of ranges) {
+        const prev = merged[merged.length - 1];
+        if (!prev || range.start > prev.end + 1) {
+            merged.push({ ...range });
+            continue;
+        }
+        prev.end = Math.max(prev.end, range.end);
+    }
+
+    return { ranges: merged };
 }
 
 function totalIPsInRanges(ranges) {
