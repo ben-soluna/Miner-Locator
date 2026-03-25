@@ -1,7 +1,9 @@
 <!-- Version: 0.2.2 -->
 # Miner-Finder
 
-Last updated: 2026-03-17 (session 2)
+**GitHub:** https://github.com/ben-soluna/Miner-Locator
+
+Last updated: 2026-03-24 (v0.2.2)
 
 Lightweight miner network scanner with a browser UI and real-time scan results over Server-Sent Events (SSE).
 
@@ -9,23 +11,11 @@ Lightweight miner network scanner with a browser UI and real-time scan results o
 
 - Home tab scanning: active
 - IP Ranges management: active (saved ranges, multi-select, combined expressions)
-- Site Map: intentionally disabled — pending redesign
 - Sidebar resize control in Settings: active
 
-## Roadmap Snapshot
+## Roadmap
 
-Source of truth: `public/TODO.md`
-
-Frontend next:
-
-- Reintroduce a production-ready Site Map view after redesign.
-
-Backend (incomplete):
-
-- Sends `summary+stats+pools+version+devs` as a single joined CGMiner command per host.
-- `devdetails` deferred to a conditional extra pass — not fetched unless fields are missing.
-- `MINER_API_TIMEOUT_MS` env variable (default `1200` ms) controls per-host socket timeout.
-- Lightweight fallback enrichment for MAC address, hostname, and OS hints.
+See `public/TODO.md` for detailed feature tracking.
 
 ## Requirements
 
@@ -39,30 +29,17 @@ npm install
 npm start
 ```
 
-Open:
-
-- `http://localhost:3000`
+Open: `http://localhost:3067`
 
 ## Scripts
 
-- `npm start`
-  - Starts `server.js` on port `3000`.
-- `npm run test:api`
-  - Verifies backend basics (`GET /` and input validation on `GET /api/scan`).
-- `npm run test:ui-smoke`
-  - Runs the UI clickthrough test against a running server (or starts one automatically).
-- `npm run build:exe`
-  - Builds an OS-native executable into `dist/` (`linux` on Linux, `win.exe` on Windows).
-- `npm run build:exe:win`
-  - Builds a Windows portable executable into `dist/` from any OS when supported by `pkg`.
-- `npm run bundle:portable:win`
-  - Creates a shareable `portable-win/` folder with `miner-finder.exe`, `start.bat`, and `README.txt`.
-- `npm run bundle:usb:win`
-  - Alias for USB-ready Windows package flow (outputs to `portable-win/`).
-- `npm run bundle:node:win`
-  - Creates `dist/miner-finder-v<version>-portable-win.zip` containing signed `node.exe`, app files, and launchers (`start.bat`, `run-from-usb.bat`) to avoid SmartScreen blocking on custom `.exe`.
-- `npm run test:project`
-  - Full verification pipeline: syntax checks + API checks + UI clickthrough + executable build.
+- `npm start` — Starts `server.js` on port 3067.
+- `npm run test:api` — API validation checks.
+- `npm run test:ui-smoke` — UI clickthrough test with Selenium.
+- `npm run build:exe` — Build OS-native executable to `dist/`.
+- `npm run bundle:portable:win` — Create Windows portable bundle with launcher.
+- `npm run bundle:node:win` — Create signed Node.js Windows package (SmartScreen-friendly).
+- `npm run test:project` — Full verification: syntax + API + UI + build.
 
 ## Windows Validation
 
