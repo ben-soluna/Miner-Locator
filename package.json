@@ -1,0 +1,13 @@
+{
+  "name": "miner-locator",
+  "version": "0.2.2",
+  "private": true,
+  "description": "Minimal runtime package for Miner-Finder server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
