@@ -125,6 +125,7 @@ function openModal(viewId) {
     pendingColumns = JSON.parse(JSON.stringify(getColumnsForView(pendingColumnsViewId)));
     getEl('applyBtn').disabled = true;
     renderModalList();
+    refreshToggleAllColumnsButton();
     getEl('colModal').classList.add('is-open');
 }
 
@@ -138,6 +139,39 @@ function applyChanges() {
 }
 
 function markAsChanged() { getEl('applyBtn').disabled = false; }
+
+function areAllEditablePendingColumnsVisible() {
+    const editableColumns = pendingColumns.filter((col) => !col.lockVisible);
+    if (editableColumns.length === 0) return true;
+    return editableColumns.every((col) => col.visible);
+}
+
+function refreshToggleAllColumnsButton() {
+    const toggleBtn = getEl('toggleAllColsBtn');
+    if (!toggleBtn) return;
+    toggleBtn.innerText = areAllEditablePendingColumnsVisible() ? 'Deselect All' : 'Select All';
+}
+
+function setAllPendingColumnsVisible(visible) {
+    let changed = false;
+    pendingColumns.forEach((col) => {
+        if (col.lockVisible) return;
+        if (col.visible !== visible) {
+            col.visible = visible;
+            changed = true;
+        }
+    });
+
+    if (!changed) return;
+    markAsChanged();
+    renderModalList();
+    refreshToggleAllColumnsButton();
+}
+
+function toggleAllColumnsInModal() {
+    const allVisible = areAllEditablePendingColumnsVisible();
+    setAllPendingColumnsVisible(!allVisible);
+}
 
 function renderModalList() {
     const list = getEl('colList');
@@ -153,6 +187,7 @@ function renderModalList() {
             </div>
         `;
     });
+    refreshToggleAllColumnsButton();
 }
 
 function bindModalListEvents(list) {

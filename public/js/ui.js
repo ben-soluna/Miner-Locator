@@ -17,14 +17,20 @@ function updateScanConcurrencyHint() {
     if (!hint) return;
 
     let profile = 'Balanced';
-    if (scanConcurrency <= 24) profile = 'Gentle';
-    else if (scanConcurrency >= 80) profile = 'Aggressive';
+    if (scanConcurrency <= 96) profile = 'Gentle';
+    else if (scanConcurrency >= 768) profile = 'Aggressive';
 
-    hint.innerText = `Current: ${scanConcurrency} (${profile}). Higher is faster but can increase switch load.`;
+    hint.innerText = `Current: ${scanConcurrency} (${profile}). Higher is faster; 2000 is max and may stress network/miners.`;
 }
 
 function persistScanConcurrencySetting() {
     localStorage.setItem(scanConcurrencyStorageKey, String(scanConcurrency));
+}
+
+function updateScanConcurrencyValueDisplay() {
+    const valueEl = getEl('scanConcurrencyValue');
+    if (!valueEl) return;
+    valueEl.innerText = String(scanConcurrency);
 }
 
 function initScanConcurrencySetting() {
@@ -34,6 +40,7 @@ function initScanConcurrencySetting() {
     const raw = localStorage.getItem(scanConcurrencyStorageKey);
     scanConcurrency = clampScanConcurrency(raw || defaultScanConcurrency);
     input.value = String(scanConcurrency);
+    updateScanConcurrencyValueDisplay();
     updateScanConcurrencyHint();
 }
 
@@ -43,6 +50,7 @@ function handleScanConcurrencyInput() {
 
     scanConcurrency = clampScanConcurrency(input.value);
     input.value = String(scanConcurrency);
+    updateScanConcurrencyValueDisplay();
     persistScanConcurrencySetting();
     updateScanConcurrencyHint();
 }
@@ -210,6 +218,7 @@ function resetScanConcurrencySetting() {
     scanConcurrency = defaultScanConcurrency;
     const input = getEl('scanConcurrencyInput');
     if (input) input.value = String(scanConcurrency);
+    updateScanConcurrencyValueDisplay();
     persistScanConcurrencySetting();
     updateScanConcurrencyHint();
 }
@@ -241,22 +250,64 @@ function setQuickRangeInputValue(value) {
     suppressQuickRangeInputHandler = false;
 }
 
+function logDevModeDebug(stage, details = {}) {
+    const timestamp = new Date().toISOString();
+    console.log('[DevMode]', timestamp, stage, details);
+}
+
+function updateDeveloperUiVisibility() {
+    const testBtn = getEl('testBtn');
+    const testBtnExists = Boolean(testBtn);
+    if (testBtn) {
+        testBtn.style.display = devMode ? '' : 'none';
+    }
+
+    document.body.classList.toggle('dev-mode-enabled', devMode);
+    logDevModeDebug('updateDeveloperUiVisibility', {
+        devMode,
+        testBtnExists,
+        testBtnDisplay: testBtn ? testBtn.style.display || '(default)' : '(missing)',
+        bodyHasDevClass: document.body.classList.contains('dev-mode-enabled')
+    });
+}
+
 // Dev Mode toggle
 function initDevModeSetting() {
     const toggle = getEl('devModeToggle');
-    if (!toggle) return;
+    if (!toggle) {
+        logDevModeDebug('initDevModeSetting:toggle-missing');
+        return;
+    }
     
     const stored = localStorage.getItem('devMode');
     devMode = stored === 'true';
     toggle.checked = devMode;
+    logDevModeDebug('initDevModeSetting:applied', {
+        stored,
+        parsedDevMode: devMode,
+        toggleChecked: toggle.checked
+    });
+    updateDeveloperUiVisibility();
 }
 
 function handleDevModeToggle() {
     const toggle = getEl('devModeToggle');
-    if (!toggle) return;
+    if (!toggle) {
+        logDevModeDebug('handleDevModeToggle:toggle-missing');
+        return;
+    }
     
+    const previousDevMode = devMode;
     devMode = toggle.checked;
     localStorage.setItem('devMode', String(devMode));
+    logDevModeDebug('handleDevModeToggle:changed', {
+        previousDevMode,
+        nextDevMode: devMode,
+        toggleChecked: toggle.checked,
+        persisted: localStorage.getItem('devMode')
+    });
+    updateDeveloperUiVisibility();
+    renderTable();
 }
 
 // Switches between sidebar views and updates active menu state

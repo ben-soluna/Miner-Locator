@@ -10,24 +10,44 @@ const { execFile } = require('child_process');
 const app = express();
 const PORT = parseInt(process.env.PORT || '3067', 10) || 3067;
 const MAX_IPS_PER_SCAN = 65536;
-const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.SCAN_CONCURRENCY || '48', 10) || 48);
+const API_PORT_CGMINER = 4028;
+const API_PORT_ANTMINER_6060 = 6060;
+const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.SCAN_CONCURRENCY || '256', 10) || 256);
 const HTTP_FALLBACK_CONCURRENCY = Math.max(1, parseInt(process.env.HTTP_FALLBACK_CONCURRENCY || '6', 10) || 6);
 const PER_HOST_COMMAND_CONCURRENCY = Math.max(1, parseInt(process.env.PER_HOST_COMMAND_CONCURRENCY || '2', 10) || 2);
 const MINER_API_TIMEOUT_MS = Math.max(200, parseInt(process.env.MINER_API_TIMEOUT_MS || '1200', 10) || 1200);
+const PROBE_TIMEOUT_MS = Math.max(100, parseInt(process.env.PROBE_TIMEOUT_MS || '300', 10) || 300);
+const DISCOVERY_API_TIMEOUT_MS = Math.max(150, parseInt(process.env.DISCOVERY_API_TIMEOUT_MS || '450', 10) || 450);
+const ENRICHMENT_API_TIMEOUT_MS = Math.max(200, parseInt(process.env.ENRICHMENT_API_TIMEOUT_MS || String(MINER_API_TIMEOUT_MS), 10) || MINER_API_TIMEOUT_MS);
+const RECOVERY_PROBE_TIMEOUT_MS = Math.max(PROBE_TIMEOUT_MS, parseInt(process.env.RECOVERY_PROBE_TIMEOUT_MS || '900', 10) || 900);
+const RECOVERY_DISCOVERY_TIMEOUT_MS = Math.max(DISCOVERY_API_TIMEOUT_MS, parseInt(process.env.RECOVERY_DISCOVERY_TIMEOUT_MS || '900', 10) || 900);
 const MIN_SCAN_CONCURRENCY = 1;
-const MAX_SCAN_CONCURRENCY = 128;
-const GLOBAL_CHECK_CONCURRENCY = Math.max(1, parseInt(process.env.GLOBAL_CHECK_CONCURRENCY || '96', 10) || 96);
+const MAX_SCAN_CONCURRENCY = 2000;
+const PROBE_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.PROBE_PASS_CONCURRENCY || '1200', 10) || 1200);
+const BASE_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.BASE_PASS_CONCURRENCY || '512', 10) || 512);
+const ENRICHMENT_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.ENRICHMENT_PASS_CONCURRENCY || '96', 10) || 96);
+const RECOVERY_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.RECOVERY_PASS_CONCURRENCY || '192', 10) || 192);
 const ARP_CACHE_TTL_MS = Math.max(200, parseInt(process.env.ARP_CACHE_TTL_MS || '1500', 10) || 1500);
 const AUTO_OPEN_BROWSER = !['0', 'false', 'no', 'off'].includes(String(process.env.AUTO_OPEN_BROWSER || '1').trim().toLowerCase());
 const ENABLE_ENRICHMENT_FALLBACK = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_ENRICHMENT_FALLBACK || '0').trim().toLowerCase());
+const ENABLE_ENRICHMENT_PASS = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_ENRICHMENT_PASS || '0').trim().toLowerCase());
+const CAPABILITY_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.CAPABILITY_CACHE_TTL_MS || '600000', 10) || 600000);
+const PROTOCOL_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.PROTOCOL_CACHE_TTL_MS || '300000', 10) || 300000);
+const ICMP_SWEEP_MODE = String(process.env.ICMP_SWEEP_MODE || 'prioritize').trim().toLowerCase(); // off | prioritize | strict
+const ICMP_PING_TIMEOUT_MS = Math.max(100, parseInt(process.env.ICMP_PING_TIMEOUT_MS || '250', 10) || 250);
+const ICMP_PING_CONCURRENCY = Math.max(1, parseInt(process.env.ICMP_PING_CONCURRENCY || '2048', 10) || 2048);
 
 let activeHttpFallback = 0;
 const httpFallbackQueue = [];
-let activeGlobalChecks = 0;
-const globalCheckQueue = [];
+let activeBaseChecks = 0;
+const baseCheckQueue = [];
+let activeEnrichmentChecks = 0;
+const enrichmentCheckQueue = [];
 let arpCacheByIp = null;
 let arpCacheUpdatedAt = 0;
 let lastScanSnapshot = null;
+const commandCapabilityCacheByIp = new Map();
+const apiProtocolCacheByIp = new Map();
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -223,7 +243,7 @@ function checkMiner(ip) {
     });
 }
 
-function requestMinerCommand(ip, command) {
+function requestMinerCommand(ip, command, timeoutMs = MINER_API_TIMEOUT_MS) {
     return new Promise((resolve) => {
         const client = new net.Socket();
         let data = '';
@@ -235,10 +255,10 @@ function requestMinerCommand(ip, command) {
             resolve(result);
         }
 
-        client.setTimeout(MINER_API_TIMEOUT_MS);
+        client.setTimeout(Math.max(100, parseInt(timeoutMs, 10) || MINER_API_TIMEOUT_MS));
         client.setNoDelay(true);
 
-        client.connect(4028, ip, () => {
+        client.connect(API_PORT_CGMINER, ip, () => {
             client.write(JSON.stringify({ command }));
         });
 
@@ -268,35 +288,455 @@ function requestMinerCommand(ip, command) {
     });
 }
 
-async function requestMinerCommands(ip, commands) {
+async function requestMinerCommands(ip, commands, options = {}) {
     const list = Array.isArray(commands)
         ? commands.map(c => String(c || '').trim()).filter(Boolean)
         : [];
     if (!list.length) return {};
+    const timeoutMs = Math.max(100, parseInt(options.timeoutMs, 10) || MINER_API_TIMEOUT_MS);
+
+    function findCommandPayload(payload, commandName) {
+        if (!payload || typeof payload !== 'object') return null;
+        const wanted = normKey(commandName);
+        for (const [key, value] of Object.entries(payload)) {
+            if (normKey(key) === wanted) return value;
+        }
+        return null;
+    }
+
+    function sectionHasError(sectionPayload) {
+        if (!sectionPayload || typeof sectionPayload !== 'object') return false;
+        const statusRecords = sectionArray(sectionPayload, ['status']);
+        if (!statusRecords.length) return false;
+        return statusRecords.some((entry) => {
+            const status = String((entry && entry.STATUS) || '').trim().toUpperCase();
+            const msg = String((entry && entry.Msg) || '').trim().toLowerCase();
+            return status === 'E' || status === 'F' || msg.includes('invalid command') || msg.includes('access denied');
+        });
+    }
 
     const joined = list.join('+');
-    const response = await requestMinerCommand(ip, joined);
-    if (response && typeof response === 'object') {
-        const responseKeys = new Set(Object.keys(response).map(key => String(key).toLowerCase()));
-        const hasAnyRequestedPayload = list.some(cmd => responseKeys.has(String(cmd).toLowerCase()));
-        const statusList = Array.isArray(response.STATUS) ? response.STATUS : [];
-        const hasInvalidCommandStatus = statusList.some((entry) => {
-            const status = String((entry && entry.STATUS) || '').toUpperCase();
-            const msg = String((entry && entry.Msg) || '').toLowerCase();
-            return status === 'E' || msg.includes('invalid command');
-        });
+    const response = await requestMinerCommand(ip, joined, timeoutMs);
+    const out = {};
+    const missingOrFailed = [];
 
-        if (hasAnyRequestedPayload && !hasInvalidCommandStatus) {
-            return response;
+    if (response && typeof response === 'object') {
+        for (const cmd of list) {
+            const sectionPayload = findCommandPayload(response, cmd);
+            if (!sectionPayload || sectionHasError(sectionPayload)) {
+                missingOrFailed.push(cmd);
+                continue;
+            }
+            out[cmd] = sectionPayload;
+        }
+
+        if (missingOrFailed.length === 0) return out;
+    } else {
+        missingOrFailed.push(...list);
+    }
+
+    // Partial fallback: only retry missing/failed commands individually.
+    await runWithConcurrency(missingOrFailed, Math.max(1, Math.min(PER_HOST_COMMAND_CONCURRENCY, missingOrFailed.length || 1)), async (cmd) => {
+        out[cmd] = await requestMinerCommand(ip, cmd, timeoutMs);
+    });
+    return out;
+}
+
+function purgeExpiredCapabilityCache(now = Date.now()) {
+    for (const [ip, entry] of commandCapabilityCacheByIp.entries()) {
+        if (!entry || !entry.checkedAt || (now - entry.checkedAt) > CAPABILITY_CACHE_TTL_MS) {
+            commandCapabilityCacheByIp.delete(ip);
+        }
+    }
+}
+
+function parseCheckCapability(checkPayload) {
+    if (!checkPayload || typeof checkPayload !== 'object') return null;
+
+    const statusRecords = sectionArray(checkPayload, ['status']);
+    const hasHardError = statusRecords.some((entry) => {
+        const status = String((entry && entry.STATUS) || '').trim().toUpperCase();
+        const msg = String((entry && entry.Msg) || '').trim().toLowerCase();
+        return status === 'F' || msg.includes('invalid command') || msg.includes('access denied');
+    });
+    if (hasHardError) return false;
+
+    const checkRecords = sectionArray(checkPayload, ['check']);
+    for (const record of checkRecords) {
+        const exists = String(pickField(record, ['exists']) || '').trim().toUpperCase();
+        const access = String(pickField(record, ['access']) || '').trim().toUpperCase();
+        if (exists) {
+            if (exists === 'N') return false;
+            if (access && access === 'N') return false;
+            return true;
         }
     }
 
-    // Fallback for non-join-capable firmware variants.
-    const out = {};
-    await runWithConcurrency(list, Math.max(1, Math.min(PER_HOST_COMMAND_CONCURRENCY, list.length)), async (cmd) => {
-        out[cmd] = await requestMinerCommand(ip, cmd);
+    return null;
+}
+
+async function getCommandCapabilities(ip, commands, timeoutMs = DISCOVERY_API_TIMEOUT_MS) {
+    const wanted = Array.from(new Set((commands || []).map(cmd => String(cmd || '').trim()).filter(Boolean)));
+    if (!wanted.length) return {};
+
+    const now = Date.now();
+    purgeExpiredCapabilityCache(now);
+
+    const existing = commandCapabilityCacheByIp.get(ip);
+    const cachedMap = existing && typeof existing.capabilities === 'object' ? existing.capabilities : {};
+    const missing = wanted.filter((cmd) => !Object.prototype.hasOwnProperty.call(cachedMap, cmd));
+
+    const nextMap = { ...cachedMap };
+    if (missing.length) {
+        await runWithConcurrency(missing, Math.min(4, missing.length), async (cmd) => {
+            const payload = await requestMinerCommand(ip, `check|${cmd}`, timeoutMs);
+            const capability = parseCheckCapability(payload);
+            // null means uncertain; keep command enabled by default.
+            nextMap[cmd] = capability !== false;
+        });
+    }
+
+    commandCapabilityCacheByIp.set(ip, {
+        checkedAt: now,
+        capabilities: nextMap
     });
-    return out;
+
+    const result = {};
+    for (const cmd of wanted) {
+        result[cmd] = nextMap[cmd] !== false;
+    }
+    return result;
+}
+
+async function planSupportedCommands(ip, commands, timeoutMs = DISCOVERY_API_TIMEOUT_MS) {
+    const wanted = Array.from(new Set((commands || []).map(cmd => String(cmd || '').trim()).filter(Boolean)));
+    if (!wanted.length) return [];
+    const caps = await getCommandCapabilities(ip, wanted, timeoutMs);
+    return wanted.filter((cmd) => caps[cmd] !== false);
+}
+
+function probeMinerApiPort(ip, timeoutMs = PROBE_TIMEOUT_MS) {
+    return probeTcpPort(ip, API_PORT_CGMINER, timeoutMs);
+}
+
+function probeTcpPortDetailed(ip, port, timeoutMs) {
+    return new Promise((resolve) => {
+        const client = new net.Socket();
+        const startedAt = Date.now();
+        let settled = false;
+
+        function finish(open, reason) {
+            if (settled) return;
+            settled = true;
+            resolve({
+                open: Boolean(open),
+                reason: String(reason || (open ? 'connected' : 'unknown')),
+                latencyMs: Math.max(0, Date.now() - startedAt)
+            });
+        }
+
+        client.setTimeout(Math.max(100, parseInt(timeoutMs, 10) || PROBE_TIMEOUT_MS));
+        client.connect(port, ip, () => {
+            client.destroy();
+            finish(true, 'connected');
+        });
+        client.on('timeout', () => {
+            client.destroy();
+            finish(false, 'timeout');
+        });
+        client.on('error', (err) => {
+            const code = err && err.code ? String(err.code).toLowerCase() : 'unknown';
+            finish(false, `error:${code}`);
+        });
+        client.on('close', () => {
+            finish(false, 'closed');
+        });
+    });
+}
+
+function probeTcpPort(ip, port, timeoutMs) {
+    return probeTcpPortDetailed(ip, port, timeoutMs).then((result) => Boolean(result && result.open));
+}
+
+function purgeExpiredProtocolCache(now = Date.now()) {
+    for (const [ip, entry] of apiProtocolCacheByIp.entries()) {
+        if (!entry || !entry.checkedAt || (now - entry.checkedAt) > PROTOCOL_CACHE_TTL_MS) {
+            apiProtocolCacheByIp.delete(ip);
+        }
+    }
+}
+
+async function probeApiProtocol(ip, timeoutMs = PROBE_TIMEOUT_MS) {
+    const detail = await probeApiProtocolDetailed(ip, timeoutMs);
+    return detail.protocol;
+}
+
+async function probeApiProtocolDetailed(ip, timeoutMs = PROBE_TIMEOUT_MS) {
+    const now = Date.now();
+    purgeExpiredProtocolCache(now);
+
+    const cached = apiProtocolCacheByIp.get(ip);
+    if (cached) {
+        return {
+            protocol: cached.protocol || null,
+            cacheHit: true,
+            reasonCode: cached.protocol ? `cache-${cached.protocol}` : 'cache-none',
+            attempts: []
+        };
+    }
+
+    const attempts = [];
+
+    const probe4028 = await probeTcpPortDetailed(ip, API_PORT_CGMINER, timeoutMs);
+    attempts.push({ protocol: '4028', ...probe4028 });
+    if (probe4028.open) {
+        apiProtocolCacheByIp.set(ip, { checkedAt: now, protocol: '4028' });
+        return {
+            protocol: '4028',
+            cacheHit: false,
+            reasonCode: 'connected-4028',
+            attempts
+        };
+    }
+
+    const probe6060 = await probeTcpPortDetailed(ip, API_PORT_ANTMINER_6060, timeoutMs);
+    attempts.push({ protocol: '6060', ...probe6060 });
+    if (probe6060.open) {
+        apiProtocolCacheByIp.set(ip, { checkedAt: now, protocol: '6060' });
+        return {
+            protocol: '6060',
+            cacheHit: false,
+            reasonCode: 'connected-6060',
+            attempts
+        };
+    }
+
+    apiProtocolCacheByIp.set(ip, { checkedAt: now, protocol: null });
+    return {
+        protocol: null,
+        cacheHit: false,
+        reasonCode: `no-open-port:${probe4028.reason}|${probe6060.reason}`,
+        attempts
+    };
+}
+
+function request6060Command(ip, command, timeoutMs = DISCOVERY_API_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+        const pathName = command.startsWith('/') ? command : `/${command}`;
+        const req = http.request({
+            host: ip,
+            port: API_PORT_ANTMINER_6060,
+            path: pathName,
+            method: 'GET',
+            timeout: Math.max(100, parseInt(timeoutMs, 10) || DISCOVERY_API_TIMEOUT_MS),
+            headers: {
+                'Connection': 'close'
+            }
+        }, (res) => {
+            if (!res || res.statusCode >= 500) {
+                res?.resume?.();
+                return resolve(null);
+            }
+
+            let body = '';
+            res.on('data', (chunk) => {
+                body += chunk.toString();
+                if (body.length > 32768) {
+                    req.destroy();
+                    resolve(null);
+                }
+            });
+            res.on('end', () => {
+                const trimmed = String(body || '').trim();
+                if (!trimmed) return resolve(null);
+
+                try {
+                    resolve(JSON.parse(trimmed));
+                } catch (_err) {
+                    resolve(trimmed);
+                }
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy();
+            resolve(null);
+        });
+        req.on('error', () => resolve(null));
+        req.end();
+    });
+}
+
+function asTrimmedString(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
+    try {
+        return JSON.stringify(value).trim();
+    } catch (_err) {
+        return '';
+    }
+}
+
+function parse6060RateToTHs(value) {
+    const text = asTrimmedString(value).toLowerCase();
+    if (!text) return 'N/A';
+
+    const numberMatch = text.match(/(-?\d+(?:\.\d+)?)/);
+    if (!numberMatch) return 'N/A';
+
+    const raw = parseFloat(numberMatch[1]);
+    if (!Number.isFinite(raw) || raw < 0) return 'N/A';
+
+    if (text.includes('gh')) return (raw / 1000).toFixed(2);
+    if (text.includes('mh')) return (raw / 1000000).toFixed(2);
+    if (text.includes('kh')) return (raw / 1000000000).toFixed(2);
+    if (text.includes('th')) return raw.toFixed(2);
+
+    // Most 6060 endpoints report hashrate in GH/s unless explicitly stated.
+    return (raw / 1000).toFixed(2);
+}
+
+function parse6060Voltage(value) {
+    const text = asTrimmedString(value).toLowerCase();
+    if (!text) return 'N/A';
+
+    const feedbackMatch = text.match(/feedback\s*[:=]\s*(-?\d+(?:\.\d+)?)/);
+    if (feedbackMatch) {
+        const num = parseFloat(feedbackMatch[1]);
+        if (Number.isFinite(num) && num >= 0) return num.toFixed(2);
+    }
+
+    const voltageMatch = text.match(/voltage\s*[:=]\s*(-?\d+(?:\.\d+)?)/);
+    if (voltageMatch) {
+        const num = parseFloat(voltageMatch[1]);
+        if (Number.isFinite(num) && num >= 0) {
+            // Some 6060 firmware reports millivolts as integer (e.g. 1300).
+            return num > 200 ? (num / 100).toFixed(2) : num.toFixed(2);
+        }
+    }
+
+    return 'N/A';
+}
+
+function parse6060BoardCount(value) {
+    const text = asTrimmedString(value).toLowerCase();
+    if (!text) return null;
+
+    const countMatch = text.match(/(\d+)\s*(?:board|chain|hashboard|asc)/);
+    if (countMatch) {
+        const count = parseInt(countMatch[1], 10);
+        if (Number.isFinite(count) && count >= 0) return count;
+    }
+
+    return null;
+}
+
+function buildProfileFrom6060Payload(ip, payloads, baseProfile = null) {
+    const productName = asTrimmedString(payloads.productName || payloads.productname || payloads.product);
+    const boardType = asTrimmedString(payloads.board_type || payloads.boardType);
+    const minerStatus = asTrimmedString(payloads.miner_status || payloads.minerStatus);
+    const rate = payloads.rate;
+    const idealRate = payloads.ideal_rate;
+    const maxRate = payloads.max_rate;
+    const readvol = payloads.readvol;
+
+    const hashrate = parse6060RateToTHs(rate || idealRate || maxRate);
+    const voltage = parse6060Voltage(readvol);
+    const activeBoards = parse6060BoardCount(boardType || minerStatus);
+    const activeHashboards = activeBoards === null ? 'N/A' : String(activeBoards);
+    const hashboards = activeBoards === null ? 'N/A' : `${activeBoards}/${activeBoards}`;
+
+    const hasAnySignal = Boolean(
+        productName || boardType || minerStatus ||
+        hashrate !== 'N/A' || voltage !== 'N/A'
+    );
+    if (!hasAnySignal) return { ip, status: 'offline' };
+
+    const profile = {
+        ip,
+        status: 'online',
+        hostname: baseProfile?.hostname || 'N/A',
+        mac: baseProfile?.mac || 'N/A',
+        osType: baseProfile?.osType || 'N/A',
+        osVersion: baseProfile?.osVersion || 'N/A',
+        minerType: productName || baseProfile?.minerType || 'N/A',
+        controlBoard: boardType || baseProfile?.controlBoard || 'N/A',
+        pools: baseProfile?.pools || 'N/A',
+        temperatureC: baseProfile?.temperatureC || 'N/A',
+        fans: baseProfile?.fans || 'N/A',
+        fanStatus: baseProfile?.fanStatus || 'N/A',
+        voltage: voltage !== 'N/A' ? voltage : (baseProfile?.voltage || 'N/A'),
+        frequencyMHz: baseProfile?.frequencyMHz || 'N/A',
+        psuInfo: baseProfile?.psuInfo || 'N/A',
+        ipMode: baseProfile?.ipMode || 'N/A',
+        hashrateTHs: hashrate !== 'N/A' ? hashrate : (baseProfile?.hashrateTHs || 'N/A'),
+        hashboards: hashboards !== 'N/A' ? hashboards : (baseProfile?.hashboards || 'N/A'),
+        activeHashboards: activeHashboards !== 'N/A' ? activeHashboards : (baseProfile?.activeHashboards || 'N/A'),
+        os: baseProfile?.os || baseProfile?.osType || 'N/A',
+        cbType: boardType || baseProfile?.cbType || baseProfile?.controlBoard || 'N/A',
+        temp: baseProfile?.temp || baseProfile?.temperatureC || 'N/A',
+        hashrate: hashrate !== 'N/A' ? hashrate : (baseProfile?.hashrate || baseProfile?.hashrateTHs || 'N/A'),
+        apiProtocol: '6060',
+        data: {
+            source: '6060',
+            miner_status: payloads.miner_status || null,
+            productName: payloads.productName || null,
+            board_type: payloads.board_type || null,
+            rate: payloads.rate || null,
+            ideal_rate: payloads.ideal_rate || null,
+            max_rate: payloads.max_rate || null,
+            readvol: payloads.readvol || null,
+            warning: payloads.warning || null,
+            get_sn: payloads.get_sn || null,
+            summary: baseProfile?.data?.summary || null,
+            stats: baseProfile?.data?.stats || null,
+            pools: baseProfile?.data?.pools || null,
+            devs: baseProfile?.data?.devs || null,
+            version: baseProfile?.data?.version || null
+        }
+    };
+
+    return profile;
+}
+
+async function checkMinerBaseVia6060(ip, timeoutMs = DISCOVERY_API_TIMEOUT_MS) {
+    const [rate, productName, boardType, minerStatus] = await Promise.all([
+        request6060Command(ip, '/rate', timeoutMs),
+        request6060Command(ip, '/productName', timeoutMs),
+        request6060Command(ip, '/board_type', timeoutMs),
+        request6060Command(ip, '/miner_status', timeoutMs)
+    ]);
+
+    return buildProfileFrom6060Payload(ip, {
+        rate,
+        productName,
+        board_type: boardType,
+        miner_status: minerStatus
+    });
+}
+
+async function enrichMinerVia6060(baseProfile, timeoutMs = ENRICHMENT_API_TIMEOUT_MS) {
+    const ip = baseProfile.ip;
+    const [readvol, warning, idealRate, maxRate, serialNumber] = await Promise.all([
+        request6060Command(ip, '/readvol', timeoutMs),
+        request6060Command(ip, '/warning', timeoutMs),
+        request6060Command(ip, '/ideal_rate', timeoutMs),
+        request6060Command(ip, '/max_rate', timeoutMs),
+        request6060Command(ip, '/get_sn', timeoutMs)
+    ]);
+
+    return buildProfileFrom6060Payload(ip, {
+        rate: baseProfile?.data?.rate,
+        productName: baseProfile?.data?.productName,
+        board_type: baseProfile?.data?.board_type,
+        miner_status: baseProfile?.data?.miner_status,
+        readvol,
+        warning,
+        ideal_rate: idealRate,
+        max_rate: maxRate,
+        get_sn: serialNumber
+    }, baseProfile);
 }
 
 function withTimeout(promise, ms, fallback = null) {
@@ -311,6 +751,29 @@ function withTimeout(promise, ms, fallback = null) {
                 clearTimeout(timer);
                 resolve(fallback);
             });
+    });
+}
+
+function normalizeIcmpSweepMode() {
+    if (ICMP_SWEEP_MODE === 'strict') return 'strict';
+    if (ICMP_SWEEP_MODE === 'prioritize' || ICMP_SWEEP_MODE === 'priority') return 'prioritize';
+    return 'off';
+}
+
+function pingHostOnce(ip, timeoutMs = ICMP_PING_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+        const waitSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+        execFile(
+            'ping',
+            ['-n', '-c', '1', '-W', String(waitSeconds), ip],
+            { timeout: timeoutMs + 200 },
+            (err) => {
+                if (!err) return resolve({ ok: true, reason: 'reply' });
+                if (err && err.code === 'ENOENT') return resolve({ ok: false, reason: 'ping-unavailable' });
+                if (err && err.killed) return resolve({ ok: false, reason: 'timeout' });
+                return resolve({ ok: false, reason: 'no-reply' });
+            }
+        );
     });
 }
 
@@ -368,25 +831,48 @@ async function readMacFromSystem(ip) {
     });
 }
 
-function runGlobalCheckTask(task) {
+function runBaseCheckTask(task) {
     return new Promise((resolve) => {
         const execute = async () => {
-            activeGlobalChecks += 1;
+            activeBaseChecks += 1;
             try {
                 resolve(await task());
             } catch (_err) {
                 resolve(null);
             } finally {
-                activeGlobalChecks -= 1;
-                const next = globalCheckQueue.shift();
+                activeBaseChecks -= 1;
+                const next = baseCheckQueue.shift();
                 if (next) next();
             }
         };
 
-        if (activeGlobalChecks < GLOBAL_CHECK_CONCURRENCY) {
+        if (activeBaseChecks < BASE_PASS_CONCURRENCY) {
             execute();
         } else {
-            globalCheckQueue.push(execute);
+            baseCheckQueue.push(execute);
+        }
+    });
+}
+
+function runEnrichmentTask(task) {
+    return new Promise((resolve) => {
+        const execute = async () => {
+            activeEnrichmentChecks += 1;
+            try {
+                resolve(await task());
+            } catch (_err) {
+                resolve(null);
+            } finally {
+                activeEnrichmentChecks -= 1;
+                const next = enrichmentCheckQueue.shift();
+                if (next) next();
+            }
+        };
+
+        if (activeEnrichmentChecks < ENRICHMENT_PASS_CONCURRENCY) {
+            execute();
+        } else {
+            enrichmentCheckQueue.push(execute);
         }
     });
 }
@@ -836,18 +1322,49 @@ function deriveFrequencyMHz(statsRecords) {
     return formatMaybeNumber(avg, 0);
 }
 
-function deriveHashboards(statsRecords) {
+function deriveActiveHashboardsFromDevsStatus(devsPayload) {
+    const statusRecords = sectionArray(devsPayload, ['status']);
+    for (const statusRecord of statusRecords) {
+        const msgRaw = pickField(statusRecord, ['msg', 'message']);
+        const msg = String(msgRaw || '').trim();
+        if (!msg) continue;
+
+        const ascMatch = msg.match(/(\d+)\s*asc/i);
+        if (ascMatch) {
+            const value = parseInt(ascMatch[1], 10);
+            if (Number.isFinite(value) && value >= 0) return value;
+        }
+
+        const boardMatch = msg.match(/(\d+)\s*(?:chain|hashboard|board)/i);
+        if (boardMatch) {
+            const value = parseInt(boardMatch[1], 10);
+            if (Number.isFinite(value) && value >= 0) return value;
+        }
+    }
+
+    return null;
+}
+
+function deriveHashboards(statsRecords, devsPayload) {
     const totalStat = pickFieldFromRecords(statsRecords, ['hashboard', 'hashboards', 'chainnum', 'chain num']);
     const activeStat = pickFieldFromRecords(statsRecords, ['activehashboard', 'active hashboards', 'chainacn', 'chain acn']);
+    const activeFromDevsStatus = deriveActiveHashboardsFromDevsStatus(devsPayload);
     const total = parseInt(totalStat, 10);
     const active = parseInt(activeStat, 10);
 
-    if (!Number.isFinite(total) && !Number.isFinite(active)) {
+    if (!Number.isFinite(total) && !Number.isFinite(active) && activeFromDevsStatus === null) {
         return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
 
-    const resolvedActive = Number.isFinite(active) && active >= 0 ? active : null;
+    const resolvedActive = Number.isFinite(active) && active >= 0
+        ? active
+        : (activeFromDevsStatus !== null ? activeFromDevsStatus : null);
     const resolvedTotal = Number.isFinite(total) && total >= 0 ? total : null;
+
+    if (resolvedActive !== null && resolvedTotal === null) {
+        return { hashboards: 'N/A', activeHashboards: String(resolvedActive) };
+    }
+
     if (resolvedActive === null || resolvedTotal === null) {
         return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
@@ -891,7 +1408,7 @@ function deriveProfile(ip, payloads) {
     const voltage = deriveVoltage(devdetailsRecords);
     const frequencyMHz = deriveFrequencyMHz(statsRecords);
     const pools = derivePoolString(payloads.pools);
-    const hashboardData = deriveHashboards(statsRecords);
+    const hashboardData = deriveHashboards(statsRecords, payloads.devs);
 
     const psuInfo =
         pickFieldFromRecords(configRecords, ['psulabel', 'psu label', 'psu_label', 'psuid', 'psumodel', 'psu model']) ||
@@ -1068,6 +1585,117 @@ async function checkMinerDetailed(ip) {
     return enrichMissingFields(base);
 }
 
+async function checkMinerBase(ip, timeoutMs = DISCOVERY_API_TIMEOUT_MS, protocol = '4028') {
+    if (protocol === '6060') {
+        return checkMinerBaseVia6060(ip, timeoutMs);
+    }
+
+    const baseCommands = ENABLE_ENRICHMENT_PASS
+        ? ['summary', 'stats']
+        : ['summary', 'stats', 'pools', 'version', 'devs', 'config', 'devdetails'];
+
+    const basePayloads = await requestMinerCommands(ip, baseCommands, {
+        timeoutMs
+    });
+    const summary = basePayloads.summary;
+    if (!summary) return { ip, status: 'offline' };
+
+    const profile = deriveProfile(ip, {
+        summary,
+        stats: basePayloads.stats,
+        pools: basePayloads.pools || null,
+        devs: basePayloads.devs || null,
+        devdetails: basePayloads.devdetails || null,
+        edevs: null,
+        config: basePayloads.config || null,
+        version: basePayloads.version || null
+    });
+
+    profile.apiProtocol = '4028';
+
+    return profile;
+}
+
+function needsEnrichmentPass(profile) {
+    return isMissing(profile.mac) ||
+        isMissing(profile.pools) ||
+        isMissing(profile.osType) ||
+        isMissing(profile.osVersion) ||
+        isMissing(profile.hashboards) ||
+        isMissing(profile.activeHashboards) ||
+        isMissing(profile.ipMode) ||
+        isMissing(profile.cbType) ||
+        isMissing(profile.psuInfo) ||
+        isMissing(profile.voltage);
+}
+
+function getEnrichmentCommandPlan(profile) {
+    const commands = new Set();
+
+    if (isMissing(profile.pools)) {
+        commands.add('pools');
+    }
+
+    if (isMissing(profile.osType) || isMissing(profile.osVersion) || isMissing(profile.os)) {
+        commands.add('version');
+    }
+
+    if (isMissing(profile.hashboards) || isMissing(profile.activeHashboards)) {
+        commands.add('devs');
+    }
+
+    if (isMissing(profile.mac) || isMissing(profile.ipMode) || isMissing(profile.cbType) || isMissing(profile.psuInfo)) {
+        commands.add('config');
+    }
+
+    if (isMissing(profile.voltage)) {
+        commands.add('devdetails');
+    }
+
+    return Array.from(commands);
+}
+
+async function enrichMinerProfile(baseProfile) {
+    if (baseProfile?.apiProtocol === '6060') {
+        return enrichMinerVia6060(baseProfile, ENRICHMENT_API_TIMEOUT_MS);
+    }
+
+    const desiredCommands = getEnrichmentCommandPlan(baseProfile);
+    if (!desiredCommands.length) {
+        if (ENABLE_ENRICHMENT_FALLBACK) {
+            return enrichMissingFields(baseProfile);
+        }
+        return baseProfile;
+    }
+
+    const enrichCommands = await planSupportedCommands(
+        baseProfile.ip,
+        desiredCommands,
+        DISCOVERY_API_TIMEOUT_MS
+    );
+
+    const extraPayloads = await requestMinerCommands(baseProfile.ip, enrichCommands, {
+        timeoutMs: ENRICHMENT_API_TIMEOUT_MS
+    });
+
+    let enriched = deriveProfile(baseProfile.ip, {
+        summary: baseProfile?.data?.summary,
+        stats: baseProfile?.data?.stats,
+        pools: extraPayloads.pools,
+        devs: extraPayloads.devs,
+        devdetails: extraPayloads.devdetails,
+        edevs: extraPayloads.edevs,
+        config: extraPayloads.config,
+        version: extraPayloads.version
+    });
+
+    if (ENABLE_ENRICHMENT_FALLBACK) {
+        enriched = await enrichMissingFields(enriched);
+    }
+
+    return enriched;
+}
+
 async function runWithConcurrency(items, limit, worker) {
     const concurrency = Math.max(1, Math.min(limit, items.length || 1));
     let cursor = 0;
@@ -1131,6 +1759,7 @@ app.get('/api/scan', async (req, res) => {
     const range = req.query.range;
     const scanConcurrency = parseScanConcurrency(req.query.concurrency);
     const parsed = parseRangeExpression(range);
+    const icmpSweepMode = normalizeIcmpSweepMode();
 
     if (parsed.error) {
         return res.status(400).json({ error: parsed.error });
@@ -1143,9 +1772,68 @@ app.get('/api/scan', async (req, res) => {
     console.log(`Starting real-time scan for ${parsed.total} IP(s): ${range}`);
     
     let foundCount = 0;
+    let enrichedCount = 0;
+    let recoveryFoundCount = 0;
     let aborted = false;
+    let scanCompleted = false;
     const targets = [];
+    let probeTargets = [];
+    const responsiveTargets = [];
+    const nonResponsiveTargets = [];
+    const protocolByIp = new Map();
+    const protocolDetailByIp = new Map();
+    const baseOnlineResults = [];
+    const foundIps = new Set();
+    let icmpRespondedCount = 0;
+    let icmpSkippedCount = 0;
+    let icmpUnavailableCount = 0;
+    let protocol4028Count = 0;
+    let protocol6060Count = 0;
+    const probeDiagnostics = {
+        protocolCacheHits: 0,
+        protocolCacheMisses: 0,
+        probeTimeoutCount: 0,
+        probeErrorCount: 0,
+        probeClosedCount: 0,
+        probeConnected4028: 0,
+        probeConnected6060: 0
+    };
     const startedAt = new Date().toISOString();
+
+    function trackProbeReason(reason) {
+        const normalized = String(reason || '').toLowerCase();
+        if (normalized === 'timeout') probeDiagnostics.probeTimeoutCount += 1;
+        else if (normalized === 'closed') probeDiagnostics.probeClosedCount += 1;
+        else if (normalized.startsWith('error:')) probeDiagnostics.probeErrorCount += 1;
+    }
+
+    function trackProtocolDetail(detail) {
+        if (!detail) return;
+        if (detail.cacheHit) probeDiagnostics.protocolCacheHits += 1;
+        else probeDiagnostics.protocolCacheMisses += 1;
+
+        for (const attempt of (detail.attempts || [])) {
+            if (attempt && attempt.open) {
+                if (attempt.protocol === '4028') probeDiagnostics.probeConnected4028 += 1;
+                else if (attempt.protocol === '6060') probeDiagnostics.probeConnected6060 += 1;
+            } else {
+                trackProbeReason(attempt && attempt.reason);
+            }
+        }
+    }
+
+    function attachProtocolDetail(profile) {
+        if (!profile || !profile.ip) return profile;
+        const detail = protocolDetailByIp.get(profile.ip);
+        if (!detail) return profile;
+
+        return {
+            ...profile,
+            protocolAttemptReason: detail.reasonCode || 'unknown',
+            protocolAttemptCacheHit: Boolean(detail.cacheHit),
+            protocolAttempts: Array.isArray(detail.attempts) ? detail.attempts : []
+        };
+    }
 
     lastScanSnapshot = {
         startedAt,
@@ -1154,12 +1842,38 @@ app.get('/api/scan', async (req, res) => {
         range: String(range || ''),
         requestedTotal: parsed.total,
         targetCount: 0,
+        probeTargetCount: 0,
+        responsiveTargetCount: 0,
+        protocol4028Count: 0,
+        protocol6060Count: 0,
+        recoveryTargetCount: 0,
+        recoveryFoundCount: 0,
         scanConcurrency,
+        probePassConcurrency: PROBE_PASS_CONCURRENCY,
+        basePassConcurrency: BASE_PASS_CONCURRENCY,
+        enrichmentPassConcurrency: ENRICHMENT_PASS_CONCURRENCY,
+        enrichmentEnabled: ENABLE_ENRICHMENT_PASS,
+        icmpSweepMode,
+        icmpRespondedCount: 0,
+        icmpSkippedCount: 0,
+        icmpUnavailableCount: 0,
         foundCount: 0,
+        enrichedCount: 0,
+        protocolCacheHits: 0,
+        protocolCacheMisses: 0,
+        probeTimeoutCount: 0,
+        probeErrorCount: 0,
+        probeClosedCount: 0,
+        probeConnected4028: 0,
+        probeConnected6060: 0,
+        protocolHitRate: 0,
+        probeFailureRate: 0,
         results: []
     };
 
     req.on('close', () => {
+        // `close` also fires after a normal SSE completion; only mark aborted for early disconnects.
+        if (scanCompleted) return;
         aborted = true;
         if (lastScanSnapshot) {
             lastScanSnapshot.aborted = true;
@@ -1179,30 +1893,352 @@ app.get('/api/scan', async (req, res) => {
         lastScanSnapshot.targetCount = targets.length;
     }
 
-    await runWithConcurrency(targets, scanConcurrency, async (ipStr) => {
-        if (aborted) return;
+    probeTargets = targets;
+    if (icmpSweepMode !== 'off' && targets.length > 0) {
+        const icmpResponsiveTargets = [];
+        const icmpNonResponsiveTargets = [];
+        const icmpPingUnavailableTargets = [];
+        const icmpConcurrency = Math.max(1, Math.min(scanConcurrency, ICMP_PING_CONCURRENCY, MAX_SCAN_CONCURRENCY));
 
-        const result = await runGlobalCheckTask(() => checkMinerDetailed(ipStr));
-        if (aborted) return;
-        if (result && result.status === 'online') {
-            foundCount++;
-            if (lastScanSnapshot) {
-                lastScanSnapshot.foundCount = foundCount;
-                // Preserve full miner payload for post-scan debugging.
-                lastScanSnapshot.results.push(result);
+        res.write(`event: scan-progress\ndata: ${JSON.stringify({
+            phase: 'icmp',
+            mode: icmpSweepMode,
+            targetCount: targets.length,
+            pingedCount: 0,
+            pingResponsiveCount: 0,
+            pingNonResponsiveCount: 0,
+            pingUnavailableCount: 0,
+            icmpPingConcurrency: icmpConcurrency,
+            icmpPingTimeoutMs: ICMP_PING_TIMEOUT_MS
+        })}\n\n`);
+
+        await runWithConcurrency(targets, icmpConcurrency, async (ipStr, index) => {
+            if (aborted) return;
+            const pingResult = await pingHostOnce(ipStr, ICMP_PING_TIMEOUT_MS);
+            if (pingResult.ok) {
+                icmpResponsiveTargets.push(ipStr);
+            } else if (pingResult.reason === 'ping-unavailable') {
+                icmpPingUnavailableTargets.push(ipStr);
+            } else {
+                icmpNonResponsiveTargets.push(ipStr);
             }
-            res.write(`data: ${JSON.stringify(result)}\n\n`);
+
+            if ((index + 1) % 256 === 0 || (index + 1) === targets.length) {
+                res.write(`event: scan-progress\ndata: ${JSON.stringify({
+                    phase: 'icmp',
+                    mode: icmpSweepMode,
+                    targetCount: targets.length,
+                    pingedCount: index + 1,
+                    pingResponsiveCount: icmpResponsiveTargets.length,
+                    pingNonResponsiveCount: icmpNonResponsiveTargets.length,
+                    pingUnavailableCount: icmpPingUnavailableTargets.length,
+                    icmpPingConcurrency: icmpConcurrency,
+                    icmpPingTimeoutMs: ICMP_PING_TIMEOUT_MS
+                })}\n\n`);
+            }
+        });
+
+        icmpRespondedCount = icmpResponsiveTargets.length;
+        icmpUnavailableCount = icmpPingUnavailableTargets.length;
+
+        if (icmpSweepMode === 'strict') {
+            probeTargets = icmpResponsiveTargets;
+            icmpSkippedCount = icmpNonResponsiveTargets.length + icmpPingUnavailableTargets.length;
+        } else {
+            // Prioritize ping responders first, then probe everything else.
+            probeTargets = [
+                ...icmpResponsiveTargets,
+                ...icmpNonResponsiveTargets,
+                ...icmpPingUnavailableTargets
+            ];
+            icmpSkippedCount = 0;
+        }
+    }
+
+    if (lastScanSnapshot) {
+        lastScanSnapshot.probeTargetCount = probeTargets.length;
+        lastScanSnapshot.icmpSweepMode = icmpSweepMode;
+        lastScanSnapshot.icmpRespondedCount = icmpRespondedCount;
+        lastScanSnapshot.icmpSkippedCount = icmpSkippedCount;
+        lastScanSnapshot.icmpUnavailableCount = icmpUnavailableCount;
+    }
+
+    const probePassConcurrency = Math.max(1, Math.min(scanConcurrency, PROBE_PASS_CONCURRENCY, MAX_SCAN_CONCURRENCY));
+    const basePassConcurrency = Math.max(1, Math.min(scanConcurrency, BASE_PASS_CONCURRENCY, MAX_SCAN_CONCURRENCY));
+    const enrichmentPassConcurrency = Math.max(1, Math.min(scanConcurrency, ENRICHMENT_PASS_CONCURRENCY));
+    const recoveryPassConcurrency = Math.max(1, Math.min(scanConcurrency, RECOVERY_PASS_CONCURRENCY, MAX_SCAN_CONCURRENCY));
+
+    res.write(`event: scan-progress\ndata: ${JSON.stringify({
+        phase: 'probe',
+        targetCount: probeTargets.length,
+        requestedTargetCount: targets.length,
+        responsiveTargetCount: 0,
+        foundCount: 0,
+        enrichedCount: 0,
+        icmpSweepMode,
+        icmpRespondedCount,
+        icmpSkippedCount,
+        icmpUnavailableCount,
+        probePassConcurrency,
+        basePassConcurrency,
+        enrichmentPassConcurrency
+    })}\n\n`);
+
+    await runWithConcurrency(probeTargets, probePassConcurrency, async (ipStr) => {
+        if (aborted) return;
+        const probeDetail = await probeApiProtocolDetailed(ipStr, PROBE_TIMEOUT_MS);
+        protocolDetailByIp.set(ipStr, probeDetail);
+        trackProtocolDetail(probeDetail);
+        const protocol = probeDetail.protocol;
+        if (protocol) {
+            responsiveTargets.push(ipStr);
+            protocolByIp.set(ipStr, protocol);
+            if (protocol === '4028') protocol4028Count += 1;
+            else if (protocol === '6060') protocol6060Count += 1;
+        } else {
+            nonResponsiveTargets.push(ipStr);
         }
     });
 
+    if (lastScanSnapshot) {
+        lastScanSnapshot.responsiveTargetCount = responsiveTargets.length;
+        lastScanSnapshot.protocol4028Count = protocol4028Count;
+        lastScanSnapshot.protocol6060Count = protocol6060Count;
+        lastScanSnapshot.recoveryTargetCount = nonResponsiveTargets.length;
+    }
+
+    if (aborted) return;
+
+    res.write(`event: scan-progress\ndata: ${JSON.stringify({
+        phase: 'discovery',
+        targetCount: responsiveTargets.length,
+        responsiveTargetCount: responsiveTargets.length,
+        foundCount: 0,
+        enrichedCount: 0,
+        probePassConcurrency,
+        basePassConcurrency,
+        protocol4028Count,
+        protocol6060Count,
+        enrichmentPassConcurrency
+    })}\n\n`);
+
+    await runWithConcurrency(responsiveTargets, basePassConcurrency, async (ipStr) => {
+        if (aborted) return;
+
+        const protocol = protocolByIp.get(ipStr) || '4028';
+        const result = await runBaseCheckTask(() => checkMinerBase(ipStr, DISCOVERY_API_TIMEOUT_MS, protocol));
+        if (aborted) return;
+        if (result && result.status === 'online') {
+            const isNew = !foundIps.has(result.ip);
+            if (isNew) {
+                const decoratedResult = attachProtocolDetail(result);
+                foundIps.add(result.ip);
+                foundCount++;
+                baseOnlineResults.push(decoratedResult);
+                if (lastScanSnapshot) {
+                    lastScanSnapshot.foundCount = foundCount;
+                    // Preserve full miner payload for post-scan debugging.
+                    lastScanSnapshot.results.push(decoratedResult);
+                }
+                res.write(`data: ${JSON.stringify(decoratedResult)}\n\n`);
+            }
+        }
+    });
+
+    if (!aborted && nonResponsiveTargets.length > 0) {
+        res.write(`event: scan-progress\ndata: ${JSON.stringify({
+            phase: 'recovery',
+            targetCount: nonResponsiveTargets.length,
+            responsiveTargetCount: responsiveTargets.length,
+            foundCount,
+            recoveryFoundCount,
+            enrichedCount: 0,
+            probePassConcurrency,
+            basePassConcurrency,
+            recoveryPassConcurrency,
+            protocol4028Count,
+            protocol6060Count,
+            enrichmentPassConcurrency
+        })}\n\n`);
+
+        await runWithConcurrency(nonResponsiveTargets, recoveryPassConcurrency, async (ipStr) => {
+            if (aborted) return;
+
+            const probeDetail = await probeApiProtocolDetailed(ipStr, RECOVERY_PROBE_TIMEOUT_MS);
+            protocolDetailByIp.set(ipStr, probeDetail);
+            trackProtocolDetail(probeDetail);
+            const protocol = probeDetail.protocol;
+            if (!protocol) return;
+            protocolByIp.set(ipStr, protocol);
+            if (protocol === '4028') protocol4028Count += 1;
+            else if (protocol === '6060') protocol6060Count += 1;
+
+            const result = await runBaseCheckTask(() => checkMinerBase(ipStr, RECOVERY_DISCOVERY_TIMEOUT_MS, protocol));
+            if (aborted || !result || result.status !== 'online') return;
+
+            if (foundIps.has(result.ip)) return;
+
+            const decoratedResult = attachProtocolDetail(result);
+            foundIps.add(result.ip);
+            foundCount += 1;
+            recoveryFoundCount += 1;
+            baseOnlineResults.push(decoratedResult);
+            if (lastScanSnapshot) {
+                lastScanSnapshot.foundCount = foundCount;
+                lastScanSnapshot.recoveryFoundCount = recoveryFoundCount;
+                lastScanSnapshot.results.push(decoratedResult);
+            }
+
+            res.write(`data: ${JSON.stringify(decoratedResult)}\n\n`);
+            res.write(`event: scan-progress\ndata: ${JSON.stringify({
+                phase: 'recovery',
+                targetCount: nonResponsiveTargets.length,
+                responsiveTargetCount: responsiveTargets.length,
+                foundCount,
+                recoveryFoundCount,
+                enrichedCount: 0,
+                probePassConcurrency,
+                basePassConcurrency,
+                recoveryPassConcurrency,
+                protocol4028Count,
+                protocol6060Count,
+                enrichmentPassConcurrency
+            })}\n\n`);
+        });
+    }
+
+    if (!aborted) {
+        res.write(`event: discovery-done\ndata: ${JSON.stringify({
+            targetCount: targets.length,
+            probeTargetCount: probeTargets.length,
+            responsiveTargetCount: responsiveTargets.length,
+            foundCount,
+            recoveryFoundCount,
+            enrichmentEnabled: ENABLE_ENRICHMENT_PASS,
+            enrichmentTargetCount: ENABLE_ENRICHMENT_PASS ? baseOnlineResults.length : 0
+        })}\n\n`);
+    }
+
+    if (!aborted && ENABLE_ENRICHMENT_PASS) {
+        res.write(`event: scan-progress\ndata: ${JSON.stringify({
+            phase: 'enrichment',
+            targetCount: responsiveTargets.length,
+            responsiveTargetCount: responsiveTargets.length,
+            foundCount,
+            recoveryFoundCount,
+            enrichedCount: 0,
+            enrichmentTargetCount: baseOnlineResults.length,
+            probePassConcurrency,
+            basePassConcurrency,
+            recoveryPassConcurrency,
+            protocol4028Count,
+            protocol6060Count,
+            enrichmentPassConcurrency
+        })}\n\n`);
+
+        await runWithConcurrency(baseOnlineResults, enrichmentPassConcurrency, async (baseProfile) => {
+            if (aborted) return;
+            if (!baseProfile || !baseProfile.ip) return;
+            if (!needsEnrichmentPass(baseProfile) && !ENABLE_ENRICHMENT_FALLBACK) return;
+
+            const enriched = await runEnrichmentTask(() => enrichMinerProfile(baseProfile));
+            if (aborted || !enriched || enriched.status !== 'online') return;
+
+            const decoratedEnriched = attachProtocolDetail(enriched);
+
+            enrichedCount += 1;
+            if (lastScanSnapshot) {
+                lastScanSnapshot.enrichedCount = enrichedCount;
+                const existingIndex = lastScanSnapshot.results.findIndex((item) => item && item.ip === decoratedEnriched.ip);
+                if (existingIndex >= 0) {
+                    lastScanSnapshot.results[existingIndex] = decoratedEnriched;
+                } else {
+                    lastScanSnapshot.results.push(decoratedEnriched);
+                }
+            }
+
+            res.write(`event: enriched\ndata: ${JSON.stringify(decoratedEnriched)}\n\n`);
+            res.write(`event: scan-progress\ndata: ${JSON.stringify({
+                phase: 'enrichment',
+                targetCount: responsiveTargets.length,
+                responsiveTargetCount: responsiveTargets.length,
+                foundCount,
+                recoveryFoundCount,
+                enrichedCount,
+                enrichmentTargetCount: baseOnlineResults.length,
+                lastEnrichedIp: decoratedEnriched.ip,
+                probePassConcurrency,
+                basePassConcurrency,
+                recoveryPassConcurrency,
+                protocol4028Count,
+                protocol6060Count,
+                enrichmentPassConcurrency
+            })}\n\n`);
+        });
+    }
+
     console.log(`Scan complete. Found ${foundCount} miners.`);
+    const probeAttemptCount =
+        probeDiagnostics.probeTimeoutCount +
+        probeDiagnostics.probeErrorCount +
+        probeDiagnostics.probeClosedCount +
+        probeDiagnostics.probeConnected4028 +
+        probeDiagnostics.probeConnected6060;
+    const probeFailureCount =
+        probeDiagnostics.probeTimeoutCount +
+        probeDiagnostics.probeErrorCount +
+        probeDiagnostics.probeClosedCount;
+    const protocolHitRate = probeTargets.length > 0 ? responsiveTargets.length / probeTargets.length : 0;
+    const probeFailureRate = probeAttemptCount > 0 ? probeFailureCount / probeAttemptCount : 0;
+
     if (lastScanSnapshot) {
         lastScanSnapshot.foundCount = foundCount;
+        lastScanSnapshot.recoveryFoundCount = recoveryFoundCount;
+        lastScanSnapshot.enrichedCount = enrichedCount;
+        lastScanSnapshot.protocol4028Count = protocol4028Count;
+        lastScanSnapshot.protocol6060Count = protocol6060Count;
+        lastScanSnapshot.protocolCacheHits = probeDiagnostics.protocolCacheHits;
+        lastScanSnapshot.protocolCacheMisses = probeDiagnostics.protocolCacheMisses;
+        lastScanSnapshot.icmpSweepMode = icmpSweepMode;
+        lastScanSnapshot.icmpRespondedCount = icmpRespondedCount;
+        lastScanSnapshot.icmpSkippedCount = icmpSkippedCount;
+        lastScanSnapshot.icmpUnavailableCount = icmpUnavailableCount;
+        lastScanSnapshot.probeTimeoutCount = probeDiagnostics.probeTimeoutCount;
+        lastScanSnapshot.probeErrorCount = probeDiagnostics.probeErrorCount;
+        lastScanSnapshot.probeClosedCount = probeDiagnostics.probeClosedCount;
+        lastScanSnapshot.probeConnected4028 = probeDiagnostics.probeConnected4028;
+        lastScanSnapshot.probeConnected6060 = probeDiagnostics.probeConnected6060;
+        lastScanSnapshot.protocolHitRate = Number(protocolHitRate.toFixed(4));
+        lastScanSnapshot.probeFailureRate = Number(probeFailureRate.toFixed(4));
         lastScanSnapshot.aborted = aborted;
         lastScanSnapshot.finishedAt = new Date().toISOString();
     }
     if (aborted) return;
-    res.write(`event: done\ndata: {}\n\n`);
+    scanCompleted = true;
+    res.write(`event: done\ndata: ${JSON.stringify({
+        targetCount: targets.length,
+        probeTargetCount: probeTargets.length,
+        responsiveTargetCount: responsiveTargets.length,
+        foundCount,
+        recoveryFoundCount,
+        enrichedCount,
+        enrichmentEnabled: ENABLE_ENRICHMENT_PASS,
+        icmpSweepMode,
+        icmpRespondedCount,
+        icmpSkippedCount,
+        icmpUnavailableCount,
+        protocol4028Count,
+        protocol6060Count,
+        protocolCacheHits: probeDiagnostics.protocolCacheHits,
+        protocolCacheMisses: probeDiagnostics.protocolCacheMisses,
+        probeTimeoutCount: probeDiagnostics.probeTimeoutCount,
+        probeErrorCount: probeDiagnostics.probeErrorCount,
+        probeClosedCount: probeDiagnostics.probeClosedCount,
+        probeConnected4028: probeDiagnostics.probeConnected4028,
+        probeConnected6060: probeDiagnostics.probeConnected6060,
+        protocolHitRate: Number((probeTargets.length > 0 ? (responsiveTargets.length / probeTargets.length) : 0).toFixed(4)),
+        probeFailureRate: Number(probeFailureRate.toFixed(4))
+    })}\n\n`);
     res.end();
 });
 
@@ -1232,7 +2268,27 @@ app.get('/api/scan/last', (req, res) => {
                 range: lastScanSnapshot.range,
                 requestedTotal: lastScanSnapshot.requestedTotal,
                 targetCount: lastScanSnapshot.targetCount,
+                probeTargetCount: lastScanSnapshot.probeTargetCount || lastScanSnapshot.targetCount || 0,
+                responsiveTargetCount: lastScanSnapshot.responsiveTargetCount || 0,
+                enrichmentEnabled: lastScanSnapshot.enrichmentEnabled !== false,
+                icmpSweepMode: lastScanSnapshot.icmpSweepMode || 'off',
+                icmpRespondedCount: lastScanSnapshot.icmpRespondedCount || 0,
+                icmpSkippedCount: lastScanSnapshot.icmpSkippedCount || 0,
+                icmpUnavailableCount: lastScanSnapshot.icmpUnavailableCount || 0,
+                protocol4028Count: lastScanSnapshot.protocol4028Count || 0,
+                protocol6060Count: lastScanSnapshot.protocol6060Count || 0,
                 foundCount: lastScanSnapshot.foundCount,
+                recoveryFoundCount: lastScanSnapshot.recoveryFoundCount || 0,
+                enrichedCount: lastScanSnapshot.enrichedCount || 0,
+                protocolCacheHits: lastScanSnapshot.protocolCacheHits || 0,
+                protocolCacheMisses: lastScanSnapshot.protocolCacheMisses || 0,
+                probeTimeoutCount: lastScanSnapshot.probeTimeoutCount || 0,
+                probeErrorCount: lastScanSnapshot.probeErrorCount || 0,
+                probeClosedCount: lastScanSnapshot.probeClosedCount || 0,
+                probeConnected4028: lastScanSnapshot.probeConnected4028 || 0,
+                probeConnected6060: lastScanSnapshot.probeConnected6060 || 0,
+                protocolHitRate: lastScanSnapshot.protocolHitRate || 0,
+                probeFailureRate: lastScanSnapshot.probeFailureRate || 0,
                 scanConcurrency: lastScanSnapshot.scanConcurrency
             },
             result: match
@@ -1250,7 +2306,27 @@ app.get('/api/scan/last', (req, res) => {
             range: lastScanSnapshot.range,
             requestedTotal: lastScanSnapshot.requestedTotal,
             targetCount: lastScanSnapshot.targetCount,
+            probeTargetCount: lastScanSnapshot.probeTargetCount || lastScanSnapshot.targetCount || 0,
+            responsiveTargetCount: lastScanSnapshot.responsiveTargetCount || 0,
+            enrichmentEnabled: lastScanSnapshot.enrichmentEnabled !== false,
+            icmpSweepMode: lastScanSnapshot.icmpSweepMode || 'off',
+            icmpRespondedCount: lastScanSnapshot.icmpRespondedCount || 0,
+            icmpSkippedCount: lastScanSnapshot.icmpSkippedCount || 0,
+            icmpUnavailableCount: lastScanSnapshot.icmpUnavailableCount || 0,
+            protocol4028Count: lastScanSnapshot.protocol4028Count || 0,
+            protocol6060Count: lastScanSnapshot.protocol6060Count || 0,
             foundCount: lastScanSnapshot.foundCount,
+            recoveryFoundCount: lastScanSnapshot.recoveryFoundCount || 0,
+            enrichedCount: lastScanSnapshot.enrichedCount || 0,
+            protocolCacheHits: lastScanSnapshot.protocolCacheHits || 0,
+            protocolCacheMisses: lastScanSnapshot.protocolCacheMisses || 0,
+            probeTimeoutCount: lastScanSnapshot.probeTimeoutCount || 0,
+            probeErrorCount: lastScanSnapshot.probeErrorCount || 0,
+            probeClosedCount: lastScanSnapshot.probeClosedCount || 0,
+            probeConnected4028: lastScanSnapshot.probeConnected4028 || 0,
+            probeConnected6060: lastScanSnapshot.probeConnected6060 || 0,
+            protocolHitRate: lastScanSnapshot.protocolHitRate || 0,
+            probeFailureRate: lastScanSnapshot.probeFailureRate || 0,
             scanConcurrency: lastScanSnapshot.scanConcurrency,
             returned: results.length,
             totalResults: lastScanSnapshot.results.length

@@ -58,6 +58,29 @@
 - [x] Simplify Edit Columns to text plus grab-hand control
 - [x] Move grab-hand control to the left of Edit Columns
 - [x] Match top and bottom spacing around the Edit Columns control
+- [x] Add top-level toggle-all button in Edit Columns popups (Home + Flagged) that flips between Select All and Deselect All
+- [x] Gate Load Test Data and Debug JSON actions so they are visible only when Developer Mode is enabled
+- [x] Make Flag column compact by default and auto-expand in Developer Mode to fit Debug JSON actions
+- [x] Add console debug logging for Developer Mode toggle lifecycle (init, visibility update, and change events)
+- [x] Retune scan concurrency defaults/limits for faster scans (default 256, max 2000, backend base cap 512)
+- [x] Implement two-pass scan pipeline (fast base pass + enrichment pass) and raise scan concurrency ceiling to 2000
+- [x] Change scan concurrency selector to a slider with live value readout
+- [x] Show live scan phase output in status line (Discovery vs Enrichment with counters)
+- [x] Add ultra-fast API port probe stage before discovery to skip non-responsive hosts quickly
+- [x] Add tiered scan timeouts (probe/discovery/enrichment) for faster first results
+- [x] Switch default discovery payload to lightweight summary+stats and move deep fields to enrichment
+- [x] Emit discovery-complete event before enrichment finishes so progress is visible sooner
+- [x] Add second-chance recovery sweep for probe misses to improve miner coverage
+- [x] Improve joined-command handling with partial per-command retry when some joined sections fail
+- [x] Add `check|cmd` capability cache and supported-command planner for enrichment requests
+- [x] Add protocol-aware scan fallback with 6060 read-only adapter (probe/discovery/recovery/enrichment)
+- [x] Add field-driven enrichment planner to request only missing-field commands per miner
+- [x] Fix SSE scan completion metadata so normal `done` closes do not mark snapshots as `aborted`
+- [x] Add per-host protocol attempt reason codes to scan results
+- [x] Add scan snapshot probe diagnostics (cache hit/miss, timeout/error rates, protocol hit rate)
+- [x] Add optional parallel ICMP pre-pass modes (`off`/`prioritize`/`strict`) for enterprise scan acceleration
+- [x] Set default ICMP pre-pass mode to `prioritize` for faster first results
+- [x] Disable enrichment pass by default and fold key fields into single-pass discovery
 - [x] Normalize Edit Columns spacing with equal top and bottom padding
 - [x] Move sorting to outlined up/down arrow controls in each column header
 - [x] Stack column sort arrows vertically and increase their size
@@ -95,22 +118,23 @@
 - [x] Defer `devdetails` / `edevs` / `config` to a conditional extra pass (only when fields are still missing after base pass).
 - [x] Add `MINER_API_TIMEOUT_MS` env variable (default 1200 ms, min 200 ms).
 - [x] Add `client.setNoDelay(true)` to reduce TCP Nagle latency on miner connections.
-- [ ] Map `Hashboard Number` from `devs` call `STATUS[0].Msg` format (for example, `"3 ASC(s)"` means 3 active hashboards).
+- [x] Map `Hashboard Number` from `devs` call `STATUS[0].Msg` format (for example, `"3 ASC(s)"` means 3 active hashboards).
 - [ ] Diagnose and fix scan failures specific to Antminer S21 XP models.
+- [ ] Reevaluate scan architecture for completeness-first flow: minimal discovery for miner detection, non-blocking metadata pass, and simpler retry/recovery path.
 
 ## Backend Roadmap (Prioritized)
-- [ ] Phase 1: Add protocol capability probe per host (4028 / 6060 / both / unknown).
-- [ ] Phase 1: Add capability cache with TTL to avoid repeated failed probes.
-- [ ] Phase 1: Add deterministic fallback order (joined 4028 -> split 4028 -> 6060 read-only).
-- [ ] Phase 1: Add per-host protocol attempt reason codes in scan output.
-- [ ] Phase 2: Implement 6060 read-only adapter client.
-- [ ] Phase 2: Implement 6060 parser for mixed text and JSON responses.
-- [ ] Phase 2: Map 6060 status commands into existing profile fields.
+- [x] Phase 1: Add protocol capability probe per host (4028 / 6060 / both / unknown).
+- [x] Phase 1: Add capability cache with TTL to avoid repeated failed probes.
+- [x] Phase 1: Add deterministic fallback order (joined 4028 -> split 4028 -> 6060 read-only).
+- [x] Phase 1: Add per-host protocol attempt reason codes in scan output.
+- [x] Phase 2: Implement 6060 read-only adapter client.
+- [x] Phase 2: Implement 6060 parser for mixed text and JSON responses.
+- [x] Phase 2: Map 6060 status commands into existing profile fields.
 - [ ] Phase 3: Add field-level source metadata (which command populated each field).
 - [ ] Phase 3: Add model-family mapping profiles (S19 XP, S21 XP, other).
-- [ ] Phase 4: Add protocol and command timing/error metrics.
+- [x] Phase 4: Add protocol and command timing/error metrics.
 - [ ] Phase 4: Extend debug endpoint with attempt timeline and parse outcomes.
-- [ ] Phase 4: Add scan snapshot diagnostics (protocol hit rate, timeout rate, parse failures).
+- [x] Phase 4: Add scan snapshot diagnostics (protocol hit rate, timeout rate, parse failures).
 - [ ] Phase 5: Keep 6060 write commands disabled by default (fan/uart/resetcore/set_sn/flush).
 - [ ] Phase 5: Add explicit admin toggle and allowlist guard for any future write commands.
 - [ ] Phase 6: Add protocol-specific timeout and retry policy tables.

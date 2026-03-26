@@ -298,7 +298,8 @@ function renderTableBody(bodyId, miners, viewId) {
 
         visibleCols.forEach(col => {
             if (col.id === 'flag') {
-                const debugButtonHtml = hasDebugPayload
+                const showDebugButton = devMode && hasDebugPayload;
+                const debugButtonHtml = showDebugButton
                     ? `<button
                                 type="button"
                                 class="debug-json-btn"

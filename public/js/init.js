@@ -57,6 +57,9 @@ function setupDelegatedEventHandlers() {
             case 'apply-columns':
                 applyChanges();
                 break;
+            case 'toggle-all-columns':
+                toggleAllColumnsInModal();
+                break;
             case 'close-modal':
                 closeModal();
                 break;

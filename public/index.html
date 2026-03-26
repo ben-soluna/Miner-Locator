@@ -491,7 +491,7 @@
         }
         .flagged-actions {
             display: inline-flex;
-            gap: 8px;
+            gap: 6px;
             align-items: center;
         }
         .flag-toggle-btn {
@@ -571,6 +571,11 @@
         .flag-action-cell,
         .header-action-cell {
             text-align: center;
+            width: 108px;
+            min-width: 108px;
+        }
+        body.dev-mode-enabled .flag-action-cell,
+        body.dev-mode-enabled .header-action-cell {
             width: 210px;
             min-width: 210px;
         }
@@ -634,55 +639,69 @@
         input, button { padding: 12px 16px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 14px; transition: all 0.2s; }
         input[type="text"] { width: 250px; background: var(--input-bg); color: var(--text-color); font-weight: 500; }
         
-        /* Toggle checkbox (dev mode, etc.) */
-        .toggle-checkbox {
-            appearance: none;
-            -webkit-appearance: none;
-            display: inline-block;
-            width: 50px;
-            height: 26px;
-            background: #ccc;
-            border-radius: 13px;
-            border: none;
-            cursor: pointer;
-            position: relative;
-            transition: background 0.3s, box-shadow 0.2s;
-            padding: 0;
-            margin: 0 8px;
-        }
-        
-        .toggle-checkbox:before {
-            content: '';
-            position: absolute;
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            background: white;
-            top: 2px;
-            left: 2px;
-            transition: left 0.3s;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-        
-        .toggle-checkbox:checked {
-            background: var(--primary-color);
-        }
-        
-        .toggle-checkbox:checked:before {
-            left: 26px;
-        }
-        
-        .toggle-checkbox:focus {
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
-        }
-        
+        /* Toggle switch (hidden checkbox + slider) */
         .toggle-label {
             display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: flex-start;
+            gap: 6px;
             cursor: pointer;
             user-select: none;
+        }
+        
+        .toggle-text {
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--status-color);
+        }
+
+        .toggle-checkbox {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+            pointer-events: none;
+        }
+
+        .toggle-slider {
+            position: relative;
+            width: 30px;
+            height: 18px;
+            flex: 0 0 30px;
+            background: #b9c2d0;
+            border-radius: 999px;
+            transition: background 0.2s ease;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            left: 2px;
+            top: 2px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s ease;
+        }
+
+        .toggle-checkbox:checked + .toggle-slider {
+            background: var(--primary-color);
+        }
+
+        .toggle-checkbox:checked + .toggle-slider::before {
+            transform: translateX(12px);
+        }
+
+        .toggle-checkbox:focus-visible + .toggle-slider {
+            box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.18);
+        }
+        
+        .dev-mode-section {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
         }
         
         button { background: var(--primary-color); color: var(--primary-text); cursor: pointer; border: none; font-weight: 700; }
@@ -918,6 +937,10 @@
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--modal-bg); z-index: 1000; align-items: center; justify-content: center; }
         .modal { background: var(--container-bg); padding: 20px; border-radius: 6px; width: 420px; max-width: 92vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
         .modal h3 { margin-top: 0; }
+        .modal-top-actions { display: flex; justify-content: flex-start; gap: 10px; margin: 8px 0 10px; flex-shrink: 0; }
+        .modal-top-actions button {
+            padding: 6px 14px;
+        }
         #colList { overflow-y: auto; max-height: calc(88vh - 150px); }
         
         .col-item { display: flex; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--table-border); background: var(--container-bg); cursor: grab; transition: padding 0.2s ease, height 0.2s ease, opacity 0.2s ease; overflow: hidden; user-select: none; }
@@ -1225,27 +1248,22 @@
                 <h3>Settings</h3>
                 <p>Scanner speed and safety options.</p>
                 <div class="range-field range-field-narrow">
-                    <label for="scanConcurrencyInput">Scan Concurrency</label>
-                    <input id="scanConcurrencyInput" type="number" min="1" max="128" step="1" value="48">
+                    <label for="scanConcurrencyInput">Scan Concurrency: <span id="scanConcurrencyValue">256</span></label>
+                    <input id="scanConcurrencyInput" type="range" min="1" max="2000" step="1" value="256">
                 </div>
                 <p id="scanConcurrencyHint" class="hint-text">Higher is faster but can increase network load.</p>
-                <div class="range-field range-field-narrow">
-                    <label for="sidebarWidthInput">Sidebar Width</label>
-                    <input id="sidebarWidthInput" type="range" min="46" max="220" step="2" value="46">
-                    <input id="sidebarWidthNumberInput" type="number" min="46" max="220" step="2" value="46" aria-label="Sidebar width in pixels">
-                </div>
-                <p id="sidebarWidthHint" class="hint-text">Adjust navigation width. Labels auto-expand above 100px.</p>
-                <div class="range-field range-field-narrow">
-                    <label for="devModeToggle" class="toggle-label">Developer Mode</label>
-                    <input id="devModeToggle" type="checkbox" class="toggle-checkbox">
-                </div>
-                <p id="devModeHint" class="hint-text">Enable developer features and debug information.</p>
                 <div class="range-actions range-actions-top">
                     <button type="button" class="secondary" data-action="reset-scan-concurrency">Reset to Default</button>
-                    <button type="button" class="secondary" data-action="reset-sidebar-width">Reset Sidebar Width</button>
                     <button type="button" class="secondary" data-action="clear-cached-miners">Clear Cached Miner Data</button>
                 </div>
                 <p id="minerCacheStatus" class="hint-text">Cache status: No cached miner data.</p>
+                <div class="range-field range-field-narrow dev-mode-section">
+                    <label for="devModeToggle" class="toggle-label">
+                        <span class="toggle-text">Developer Mode</span>
+                        <input id="devModeToggle" type="checkbox" class="toggle-checkbox">
+                        <span class="toggle-slider" aria-hidden="true"></span>
+                    </label>
+                </div>
             </div>
         </section>
     </main>
@@ -1256,6 +1274,9 @@
     <div class="modal">
         <h3>Manage Columns</h3>
         <p class="modal-hint">Drag to reorder. Check to show/hide.</p>
+        <div class="modal-top-actions">
+            <button id="toggleAllColsBtn" class="secondary" data-action="toggle-all-columns">Select All</button>
+        </div>
         <div id="colList"></div>
         <div class="modal-footer">
             <button id="applyBtn" data-action="apply-columns" disabled>Apply</button>

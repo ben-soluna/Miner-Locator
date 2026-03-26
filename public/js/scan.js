@@ -263,6 +263,60 @@ function stopScan() {
     setStatus(`Scan stopped. Found ${minersData.length}.`);
 }
 
+function renderLiveScanStatus(liveState) {
+    if (!liveState || !scanInProgress) return;
+
+    if (liveState.phase === 'probe') {
+        if (Number.isFinite(liveState.targetCount)) {
+            setStatus(`Phase 0/2 Probe: checking ${liveState.targetCount} hosts for open miner API port...`);
+            return;
+        }
+        setStatus('Phase 0/2 Probe: checking hosts for open miner API port...');
+        return;
+    }
+
+    if (liveState.phase === 'recovery') {
+        const scanned = Number.isFinite(liveState.targetCount) ? liveState.targetCount : 'unknown';
+        const rescued = Number.isFinite(liveState.recoveryFoundCount) ? liveState.recoveryFoundCount : 0;
+        setStatus(`Phase 1.5/2 Recovery: found ${rescued} additional miners while re-checking ${scanned} missed hosts.`);
+        return;
+    }
+
+    if (liveState.discoveryComplete) {
+        const responsiveText = Number.isFinite(liveState.responsiveTargetCount)
+            ? `${liveState.responsiveTargetCount}`
+            : 'unknown';
+        const enrichmentText = Number.isFinite(liveState.enrichmentTargetCount)
+            ? `${liveState.enrichedCount}/${liveState.enrichmentTargetCount}`
+            : `${liveState.enrichedCount}`;
+        const ipText = liveState.lastEnrichedIp ? ` Latest: ${liveState.lastEnrichedIp}.` : '';
+        setStatus(`Discovery complete: ${liveState.foundCount} found from ${responsiveText} responsive hosts. Enrichment: ${enrichmentText}.${ipText}`);
+        return;
+    }
+
+    if (liveState.phase === 'enrichment') {
+        const targetText = Number.isFinite(liveState.enrichmentTargetCount)
+            ? `${liveState.enrichedCount}/${liveState.enrichmentTargetCount}`
+            : `${liveState.enrichedCount}`;
+        const ipText = liveState.lastEnrichedIp ? ` Latest: ${liveState.lastEnrichedIp}.` : '';
+        setStatus(`Phase 2/2 Enrichment: ${targetText}. Found: ${liveState.foundCount}.${ipText}`);
+        return;
+    }
+
+    const discovered = Number.isFinite(liveState.foundCount) ? liveState.foundCount : minersData.length;
+    if (Number.isFinite(liveState.targetCount) && Number.isFinite(liveState.responsiveTargetCount)) {
+        setStatus(`Phase 1/2 Discovery: found ${discovered} online miners while scanning ${liveState.targetCount} responsive hosts (${liveState.responsiveTargetCount} after probe).`);
+        return;
+    }
+
+    if (Number.isFinite(liveState.targetCount)) {
+        setStatus(`Phase 1/2 Discovery: found ${discovered} online miners while scanning ${liveState.targetCount} hosts.`);
+        return;
+    }
+
+    setStatus(`Phase 1/2 Discovery: found ${discovered} online miners.`);
+}
+
 // Starts backend scan stream and updates rows as events arrive
 function startScan() {
     const ipRange = getCurrentRangeExpression();
@@ -290,9 +344,51 @@ function startScan() {
     persistCachedMinerData();
     renderTable();
 
-    setStatus('Found 0.');
+    const liveState = {
+        phase: 'probe',
+        targetCount: null,
+        responsiveTargetCount: null,
+        foundCount: 0,
+        recoveryFoundCount: 0,
+        enrichedCount: 0,
+        enrichmentTargetCount: null,
+        discoveryComplete: false,
+        lastEnrichedIp: ''
+    };
+
+    renderLiveScanStatus(liveState);
 
     eventSource = new EventSource(`/api/scan?range=${encodeURIComponent(ipRange)}&concurrency=${scanConcurrency}`);
+
+    eventSource.addEventListener('scan-progress', function(event) {
+        if (!scanInProgress) return;
+        const progress = JSON.parse(event.data);
+        if (progress && typeof progress === 'object') {
+            if (progress.phase) liveState.phase = String(progress.phase);
+            if (Number.isFinite(progress.targetCount)) liveState.targetCount = progress.targetCount;
+            if (Number.isFinite(progress.responsiveTargetCount)) liveState.responsiveTargetCount = progress.responsiveTargetCount;
+            if (Number.isFinite(progress.foundCount)) liveState.foundCount = progress.foundCount;
+            if (Number.isFinite(progress.recoveryFoundCount)) liveState.recoveryFoundCount = progress.recoveryFoundCount;
+            if (Number.isFinite(progress.enrichedCount)) liveState.enrichedCount = progress.enrichedCount;
+            if (Number.isFinite(progress.enrichmentTargetCount)) liveState.enrichmentTargetCount = progress.enrichmentTargetCount;
+            if (progress.lastEnrichedIp) liveState.lastEnrichedIp = String(progress.lastEnrichedIp);
+        }
+        renderLiveScanStatus(liveState);
+    });
+
+    eventSource.addEventListener('discovery-done', function(event) {
+        if (!scanInProgress) return;
+        const data = JSON.parse(event.data);
+        liveState.discoveryComplete = true;
+        liveState.phase = 'enrichment';
+        if (data && typeof data === 'object') {
+            if (Number.isFinite(data.foundCount)) liveState.foundCount = data.foundCount;
+            if (Number.isFinite(data.responsiveTargetCount)) liveState.responsiveTargetCount = data.responsiveTargetCount;
+            if (Number.isFinite(data.recoveryFoundCount)) liveState.recoveryFoundCount = data.recoveryFoundCount;
+            if (Number.isFinite(data.enrichmentTargetCount)) liveState.enrichmentTargetCount = data.enrichmentTargetCount;
+        }
+        renderLiveScanStatus(liveState);
+    });
 
     eventSource.onmessage = function(event) {
         if (!scanInProgress) return;
@@ -303,9 +399,37 @@ function startScan() {
             status: 'online'
         }));
 
-        setStatus(`Found ${minersData.length}.`);
+        liveState.foundCount = minersData.length;
+        renderLiveScanStatus(liveState);
         scheduleScanUiUpdate();
     };
+
+    eventSource.addEventListener('enriched', function(event) {
+        if (!scanInProgress) return;
+        const miner = JSON.parse(event.data);
+        const normalized = normalizeMinerRecord({
+            ...miner,
+            status: 'online'
+        });
+
+        const existingIndex = minersData.findIndex((item) => item && item.ip === normalized.ip);
+        if (existingIndex >= 0) {
+            minersData[existingIndex] = normalized;
+        } else {
+            minersData.push(normalized);
+        }
+
+        liveState.phase = 'enrichment';
+        liveState.discoveryComplete = true;
+        liveState.foundCount = Math.max(liveState.foundCount, minersData.length);
+        liveState.enrichedCount += 1;
+        liveState.lastEnrichedIp = normalized.ip;
+        if (!Number.isFinite(liveState.enrichmentTargetCount)) {
+            liveState.enrichmentTargetCount = liveState.foundCount;
+        }
+        renderLiveScanStatus(liveState);
+        scheduleScanUiUpdate();
+    });
 
     eventSource.addEventListener('done', function() {
         if (!scanInProgress) return;
@@ -316,7 +440,7 @@ function startScan() {
         btn.innerText = 'Scan Network';
         updateRangeInfo();
         if (stopBtn) stopBtn.disabled = true;
-        setStatus(`Done. Total: ${minersData.length}`, 'var(--success-color)');
+        setStatus(`Done. Found: ${minersData.length}. Enriched: ${liveState.enrichedCount}.`, 'var(--success-color)');
     });
 
     eventSource.onerror = function() {
