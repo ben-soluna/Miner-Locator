@@ -1,0 +1,2881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Miner Locator</title>
+    <style>
+        /* --- CSS Variables & Resets --- */
+        :root {
+            --bg-color: #f0f2f5; 
+            --container-bg: #ffffff;
+            --text-color: #000000; 
+            --border-color: #c0c9d8; 
+            --table-border: #e2e8f0;
+            --th-bg: #f1f5f9; 
+            --th-hover: #e2e8f0;
+            --input-bg: #ffffff;
+            --success-color: #ea580c; 
+            --error-color: #cc0000; 
+            --status-color: #333333; 
+            --primary-color: #1d4ed8; 
+            --primary-hover: #1e3a8a;
+            --primary-text: #ffffff;
+            --gradient-accent: #00bfff; 
+            --container-shadow: 0 20px 40px rgba(0, 0, 0, 0.12); 
+            --corner-radius: 8px; 
+            --modal-bg: rgba(0,0,0,0.5);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #0d0d0d;
+                --container-bg: #1a1d21;
+                --text-color: #ffffff; 
+                --border-color: #4a5568; 
+                --table-border: #2d3748;
+                --th-bg: #2d3748; 
+                --th-hover: #4a5568;
+                --input-bg: #111111;
+                --success-color: #fb923c; 
+                --error-color: #f87171; 
+                --status-color: #e2e8f0; 
+                --primary-color: #3b82f6;
+                --primary-hover: #2563eb;
+                --gradient-accent: #34d399; 
+                --container-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        * { box-sizing: border-box; } 
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 0; background: var(--bg-color); color: var(--text-color); margin: 0; line-height: 1.5; }
+
+        /* App shell and sidebar rail layout */
+        .app-shell { display: grid; grid-template-columns: var(--sidebar-width, 46px) minmax(0, 1fr); gap: 0; width: 100%; min-height: 100vh; }
+        .sidebar {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: visible;
+        }
+        .sidebar-header {
+            display: none;
+        }
+        .sidebar-title {
+            display: none;
+        }
+        /* Sidebar menu tiles */
+        .sidebar nav { display: flex; flex-direction: column; }
+        .menu-item {
+            width: 100%;
+            text-align: left;
+            border: 0;
+            border-left: 3px solid transparent;
+            border-radius: 0;
+            background: var(--container-bg);
+            color: var(--status-color);
+            padding: 10px 10px;
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.2;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            min-height: 48px;
+            border-bottom: 1px solid var(--table-border);
+            overflow: hidden;
+            transition: background 0.2s ease, color 0.2s ease;
+            white-space: nowrap;
+            position: relative;
+            z-index: 2;
+        }
+        .menu-item:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+            z-index: 3;
+        }
+        button.menu-item:hover:not(:disabled) { background: var(--th-bg); color: var(--text-color); }
+        .menu-item.active {
+            background: var(--th-bg);
+            border-left-color: #f2b705;
+            color: var(--text-color);
+        }
+        .menu-item .menu-icon {
+            color: var(--status-color);
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .menu-item .menu-icon svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .menu-item.active .menu-icon { color: var(--text-color); }
+        .menu-item .menu-label {
+            display: inline-block;
+            opacity: 0;
+            transform: translateX(-4px);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            pointer-events: none;
+            flex-shrink: 0;
+        }
+        .menu-item:hover .menu-label {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        /* Show labels when sidebar is wide enough (> 100px) */
+        body.sidebar-expanded .menu-item .menu-label {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        /* Footer area inside sidebar */
+        .sidebar-bottom {
+            margin-top: auto;
+            border-top: 1px solid var(--table-border);
+        }
+        .sidebar-bottom .menu-item {
+            border-bottom: 1px solid var(--table-border);
+        }
+        .sidebar-version {
+            padding: 10px 6px 12px;
+            text-align: center;
+            font-size: 9px;
+            color: #b6bfcb;
+            line-height: 1.3;
+            display: none;
+        }
+        /* Main panel */
+        .main-content { min-width: 0; padding: 10px; }
+        /* View switching containers */
+        .view-panel { display: none; }
+        .view-panel.active { display: block; }
+        .placeholder-card { background: var(--container-bg); padding: 24px; border-radius: 4px; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .placeholder-card h3 { margin-top: 0; margin-bottom: 10px; }
+
+        .site-map-shell {
+            display: block;
+        }
+        .site-map-main {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            box-shadow: none;
+            padding: 10px;
+        }
+        .site-map-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        .site-map-toolbar h3 {
+            margin: 0;
+            margin-right: auto;
+            font-size: 20px;
+            letter-spacing: 0.01em;
+        }
+        .site-map-canvas {
+            height: 520px;
+            border: 1px solid var(--table-border);
+            border-radius: 0;
+            background:
+                linear-gradient(90deg, color-mix(in srgb, var(--table-border) 55%, transparent) 1px, transparent 1px) 0 0/28px 28px,
+                linear-gradient(0deg, color-mix(in srgb, var(--table-border) 55%, transparent) 1px, transparent 1px) 0 0/28px 28px,
+                linear-gradient(135deg, color-mix(in srgb, var(--th-bg) 65%, transparent), transparent);
+            position: relative;
+            overflow: hidden;
+        }
+        .site-map-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--status-color);
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .site-node {
+            position: absolute;
+            min-width: 160px;
+            border: 1px solid var(--border-color);
+            border-radius: 0;
+            background: var(--container-bg);
+            box-shadow: none;
+            padding: 6px;
+            cursor: default;
+            user-select: none;
+        }
+        .site-node.site-node-editable { cursor: grab; }
+        .site-node.site-node-editable:active { cursor: grabbing; }
+        .site-node-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .site-node-title {
+            font-weight: 600;
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .site-node-delete {
+            width: 20px;
+            height: 20px;
+            border: none;
+            border-radius: 0;
+            padding: 0;
+            font-size: 12px;
+            line-height: 1;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .site-node-delete:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .site-node-building { border-left: 4px solid #f59e0b; }
+        .site-node-rack { border-left: 4px solid #22c55e; }
+        .site-node-miner { border-left: 4px solid #3b82f6; }
+        .site-node-offline { border-left-color: #ef4444; }
+        .site-node-selected {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 1px;
+        }
+        .site-node-resize-handle {
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 12px;
+            height: 12px;
+            border-radius: 0;
+            background: color-mix(in srgb, var(--primary-color) 65%, transparent);
+            border: 1px solid color-mix(in srgb, var(--primary-hover) 70%, transparent);
+            cursor: nwse-resize;
+        }
+        .site-node-resize-handle:hover {
+            background: var(--primary-color);
+        }
+        .site-node-toggle {
+            width: 20px;
+            height: 20px;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+            font-size: 11px;
+            line-height: 1;
+            padding: 0;
+            border-radius: 0;
+            cursor: pointer;
+        }
+        .site-node-toggle:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .site-map-context {
+            margin-left: auto;
+            min-height: 30px;
+            min-width: 140px;
+            width: auto;
+            font-size: 11px;
+            color: var(--status-color);
+            border: 1px solid var(--table-border);
+            border-radius: 0;
+            padding: 6px 8px;
+            background: var(--th-bg);
+        }
+
+        .ip-ranges-panel {
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: var(--container-shadow);
+            padding: 20px;
+        }
+        .ip-ranges-panel h3 {
+            margin: 0 0 6px;
+        }
+        .ip-ranges-muted {
+            margin: 0 0 16px;
+            color: var(--status-color);
+            font-size: 13px;
+        }
+        .range-config-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(0, 2.2fr) auto;
+            gap: 12px;
+            align-items: start;
+        }
+        .range-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .range-field input,
+        .range-field select {
+            width: 100%;
+            background: var(--input-bg);
+            color: var(--text-color);
+        }
+        .range-mode-group {
+            margin-bottom: 12px;
+        }
+        .range-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .range-actions-inline {
+            display: inline-flex;
+            gap: 10px;
+            align-items: center;
+            padding-top: 28px;
+        }
+        .range-preview {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--table-border);
+            border-radius: 4px;
+            background: var(--th-bg);
+            font-size: 13px;
+            color: var(--status-color);
+            word-break: break-word;
+        }
+        .saved-range-list {
+            margin-top: 16px;
+            border: 1px solid var(--table-border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .saved-range-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(0, 2.2fr) auto;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--table-border);
+            background: var(--container-bg);
+        }
+        .saved-range-row:last-child {
+            border-bottom: none;
+        }
+        .saved-range-header {
+            background: var(--th-bg);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--status-color);
+        }
+        .saved-range-title {
+            font-weight: 700;
+        }
+        .saved-range-expression {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 14px;
+            color: var(--status-color);
+            overflow-wrap: anywhere;
+        }
+        .saved-range-actions {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .saved-action-icon {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .saved-action-icon:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .saved-action-icon svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            display: block;
+        }
+        .flagged-list {
+            margin-top: 16px;
+            border: 1px solid var(--table-border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .flagged-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--table-border);
+            background: var(--container-bg);
+        }
+        .flagged-row:last-child {
+            border-bottom: none;
+        }
+        .flagged-header {
+            background: var(--th-bg);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--status-color);
+        }
+        .flagged-empty {
+            padding: 14px 12px;
+            color: var(--status-color);
+            font-size: 13px;
+            background: var(--container-bg);
+        }
+        .flagged-actions {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .flag-toggle-btn {
+            min-width: 72px;
+            min-height: 30px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: transparent;
+            color: var(--status-color);
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .flag-toggle-btn:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .flag-toggle-btn.active {
+            background: #ea580c;
+            border-color: #ea580c;
+            color: var(--primary-text);
+        }
+        .flag-action-cell,
+        .header-action-cell {
+            text-align: center;
+            width: 110px;
+            min-width: 110px;
+        }
+        .range-inline-meta {
+            font-size: 12px;
+            color: var(--status-color);
+            margin-top: 4px;
+        }
+
+        .sidebar-resize-handle {
+            position: absolute;
+            right: -6px;
+            top: 0;
+            bottom: 0;
+            width: 12px;
+            cursor: col-resize;
+            background: transparent;
+            z-index: 10;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .sidebar-resize-handle::after {
+            content: '';
+            width: 2px;
+            height: 40px;
+            background: var(--primary-color);
+            border-radius: 1px;
+        }
+        body.edit-mode-active .sidebar-resize-handle {
+            display: flex;
+            opacity: 0.5;
+        }
+        .sidebar-resize-handle:hover::after {
+            width: 3px;
+            height: 60px;
+            background: var(--primary-color);
+        }
+        body.edit-mode-active .sidebar {
+            position: relative;
+        }
+        .app-title { margin-top: 0; margin-bottom: 25px; font-size: 38px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(90deg, #ea580c, #f59e0b); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: inline-block; }
+
+        /* --- Controls --- */
+        .controls { display: flex; gap: 15px; margin-bottom: 0; align-items: center; flex-wrap: wrap; background: var(--th-bg); padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); justify-content: space-between; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+        .control-group { display: flex; align-items: center; gap: 10px; }
+        label { font-weight: 700; font-size: 14px; color: var(--status-color); }
+        input, button { padding: 12px 16px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 14px; transition: all 0.2s; }
+        input[type="text"] { width: 250px; background: var(--input-bg); color: var(--text-color); font-weight: 500; }
+        
+        button { background: var(--primary-color); color: var(--primary-text); cursor: pointer; border: none; font-weight: 700; }
+        button:hover:not(:disabled) { background: var(--primary-hover); }
+        button.secondary { background: transparent; border: 1px solid var(--primary-color); color: var(--primary-color); }
+        button.secondary:hover { background: var(--primary-color); color: var(--primary-text); }
+        button:disabled { background: var(--border-color); cursor: not-allowed; color: var(--status-color); opacity: 0.6; }
+        
+        .icon-btn { font-size: 18px; padding: 10px 14px; display: flex; align-items: center; justify-content: center; }
+        #status { font-weight: 700; font-size: 14px; color: var(--status-color); margin-left: 10px; }
+
+        /* --- Table Styling --- */
+        .table-wrapper {
+            /* Single scroll container for BOTH axes.
+               This is required for sticky thead to work: if overflow-x and
+               overflow-y live on different elements, position:sticky breaks.
+               300px accounts for: body padding + container padding + title +
+               controls bar + table toolbar. */
+            overflow: auto;
+            max-height: calc(100vh - 300px);
+            width: 100%;
+        }
+        .table-wrapper table { border-collapse: collapse; }
+        .table-wrapper thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            /* Must be explicit so rows scrolling underneath don't show through */
+            background-color: var(--th-bg);
+        }
+        .table-tools { display: flex; justify-content: flex-start; margin: 0; padding: 10px 0; }
+        .column-toolbox {
+            padding: 0;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: stretch;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--table-border);
+            background: var(--container-bg);
+            color: var(--status-color);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+        }
+        .column-tool-label {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 12px;
+            min-height: 32px;
+            border: none;
+            border-left: 1px solid var(--table-border);
+            background: transparent;
+            color: inherit;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            text-align: center;
+        }
+        .column-tool-icon {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 4px 0 0 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+        }
+        .column-tool-label:hover,
+        .column-tool-icon:hover {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .column-tool-icon.active {
+            background: var(--th-bg);
+            color: var(--text-color);
+        }
+        .column-tool-icon svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            display: block;
+        }
+        .edit-mode-toggle {
+            padding: 0 12px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--table-border);
+            background: var(--container-bg);
+            color: var(--status-color);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+            min-height: 32px;
+        }
+        button.edit-mode-toggle:hover:not(.active) {
+            background: var(--container-bg);
+            color: var(--text-color);
+            border-color: var(--primary-color);
+            box-shadow: inset 0 0 0 1px var(--primary-color);
+        }
+        .edit-mode-toggle.active {
+            background: #ea580c;
+            color: var(--primary-text);
+            border-color: #ea580c;
+            animation: edit-mode-btn-pulse 1.4s ease-in-out infinite;
+        }
+        button.edit-mode-toggle.active:hover {
+            background: #ea580c;
+            color: var(--primary-text);
+            border-color: #ea580c;
+            box-shadow: none;
+        }
+        @keyframes edit-mode-btn-pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(234, 88, 12, 0.35);
+            }
+            50% {
+                box-shadow: 0 0 0 8px rgba(234, 88, 12, 0);
+            }
+        }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 0; font-size: 14px; }
+        th:first-child { border-top-left-radius: 0; border-left: 1px solid var(--table-border); }
+        th:last-child { border-top-right-radius: 0; border-right: 1px solid var(--table-border); }
+        th, td { text-align: left; border-bottom: 1px solid var(--table-border); border-right: 1px solid color-mix(in srgb, var(--table-border) 72%, transparent); white-space: nowrap; }
+        th:last-child, td:last-child { border-right: none; }
+        th { padding: 3px 16px; }
+        td { padding: 12px 16px; }
+        
+        th { 
+            background-color: var(--th-bg); font-weight: 700; cursor: pointer; user-select: none; 
+            text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; 
+            color: var(--status-color); border-top: 1px solid var(--table-border); 
+            transition: background 0.2s;
+        }
+        th.header-draggable { cursor: grab; }
+        th.header-draggable:active { cursor: grabbing; }
+        th:hover { background-color: var(--th-hover); color: var(--text-color); }
+
+        .header-content {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header-label {
+            display: inline-block;
+        }
+        .sort-controls {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: stretch;
+            border: 1px solid var(--container-bg);
+            border-radius: 4px;
+            overflow: hidden;
+            background: color-mix(in srgb, var(--container-bg) 78%, transparent);
+        }
+        .sort-arrow-btn {
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--status-color);
+            padding: 0;
+            margin: 0;
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 9px;
+            line-height: 1;
+            font-weight: 700;
+        }
+        .sort-arrow-btn + .sort-arrow-btn {
+            border-left: none;
+            border-top: 1px solid var(--container-bg);
+        }
+        .sort-arrow-btn:hover {
+            background: var(--container-bg);
+            color: var(--text-color);
+        }
+        .sort-arrow-btn.active {
+            background: var(--container-bg);
+            color: var(--success-color);
+        }
+        
+        /* New Table Header Drag Styles */
+        th.header-draggable {
+            position: relative;
+        }
+        th.header-dragging { opacity: 0.4; }
+        th.header-drop-before,
+        th.header-drop-after {
+            background-color: var(--th-hover);
+        }
+        th.header-drop-before::before,
+        th.header-drop-after::after {
+            content: '';
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            width: 3px;
+            background: var(--primary-color);
+            border-radius: 2px;
+            pointer-events: none;
+        }
+        th.header-drop-before::before {
+            left: -1px;
+        }
+        th.header-drop-after::after {
+            right: -1px;
+        }
+
+        tbody tr:hover { background-color: rgba(0, 0, 0, 0.03); }
+        @media (prefers-color-scheme: dark) { tbody tr:hover { background-color: rgba(255, 255, 255, 0.03); } }
+        .online { color: var(--success-color); font-weight: 700; }
+        .fan-alert { color: var(--error-color); font-weight: 700; }
+        .sort-icon { font-size: 10px; margin-left: 6px; color: var(--primary-color); }
+
+        /* --- Modal Styling --- */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--modal-bg); z-index: 1000; align-items: center; justify-content: center; }
+        .modal { background: var(--container-bg); padding: 20px; border-radius: 6px; width: 420px; max-width: 92vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: var(--container-shadow); border: 1px solid var(--border-color); }
+        .modal h3 { margin-top: 0; }
+        #colList { overflow-y: auto; max-height: calc(88vh - 150px); }
+        
+        .col-item { display: flex; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--table-border); background: var(--container-bg); cursor: grab; transition: padding 0.2s ease, height 0.2s ease, opacity 0.2s ease; overflow: hidden; user-select: none; }
+        .col-item:active { cursor: grabbing; }
+        .col-item.collapsed-slot { padding-top: 0; padding-bottom: 0; height: 0; opacity: 0; border-bottom: none; }
+        .col-item.drag-over { padding-top: 48px; }
+        
+        .drag-handle { color: var(--status-color); margin-right: 12px; font-size: 16px; user-select: none; }
+        .col-item input[type="checkbox"] { margin-right: 10px; cursor: pointer; transform: scale(1.2); }
+        .col-item span.label-text { font-weight: 500; user-select: none; pointer-events: none; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; flex-shrink: 0; }
+
+        /* Tablet/mobile layout adaptations */
+        @media (max-width: 980px) {
+            .app-shell { grid-template-columns: 1fr; gap: 14px; }
+            .sidebar { position: static; }
+            .sidebar { min-height: 0; height: auto; }
+            .sidebar nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .menu-item {
+                width: 100%;
+                min-height: 64px;
+            }
+            .menu-item .menu-label {
+                opacity: 1;
+                transform: none;
+            }
+            .sidebar-title { font-size: 14px; letter-spacing: 0.02em; text-transform: none; text-align: left; }
+            .main-content { padding: 0 6px 6px; }
+        }
+
+        @media (max-width: 640px) {
+            .container { padding: 18px; }
+            .sidebar nav { grid-template-columns: 1fr; }
+            input[type="text"] { width: 100%; }
+            .range-config-grid { grid-template-columns: 1fr; }
+            .saved-range-row { grid-template-columns: 1fr; }
+            .saved-range-actions { justify-content: flex-start; }
+            .site-map-shell { grid-template-columns: 1fr; }
+            .site-map-canvas { height: 440px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- App shell: sidebar navigation + active content view -->
+<div class="app-shell">
+    <!-- Left navigation rail -->
+    <aside class="sidebar">
+        <div id="sidebarResizeHandle" class="sidebar-resize-handle" title="Drag to resize sidebar (Edit Mode only)" aria-label="Resize sidebar"></div>
+        <!-- Primary navigation -->
+        <nav>
+            <button class="menu-item active" onclick="selectView('dashboardView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3 10.5L12 3l9 7.5"></path>
+                        <path d="M5 9.5V21h14V9.5"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Home</span>
+            </button>
+            <button class="menu-item" onclick="selectView('savedRangesView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M22 19H14M2 19H10"></path>
+                        <path d="M12 17V14"></path>
+                        <circle cx="12" cy="19" r="2"></circle>
+                        <path d="M2 11C2 9.34315 3.34315 8 5 8H19C20.6569 8 22 9.34315 22 11C22 12.6569 20.6569 14 19 14H5C3.34315 14 2 12.6569 2 11Z"></path>
+                        <path d="M2 5C2 3.34315 3.34315 2 5 2H19C20.6569 2 22 3.34315 22 5C22 6.65685 20.6569 8 19 8H5C3.34315 8 2 6.65685 2 5Z"></path>
+                        <path d="M13 5L19 5"></path>
+                        <path d="M13 11L19 11"></path>
+                        <circle cx="6" cy="5" r="1" fill="currentColor"></circle>
+                        <circle cx="6" cy="11" r="1" fill="currentColor"></circle>
+                    </svg>
+                </span>
+                <span class="menu-label">IP Ranges</span>
+            </button>
+            <button class="menu-item" onclick="selectView('flaggedMinersView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M6 3v18"></path>
+                        <path d="M6 4h11l-2.5 4L17 12H6"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Flagged Miners</span>
+            </button>
+            <button class="menu-item" disabled title="Site Map disabled">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="6" cy="6" r="2" fill="currentColor"></circle>
+                        <circle cx="18" cy="6" r="2" fill="currentColor"></circle>
+                        <circle cx="12" cy="18" r="2" fill="currentColor"></circle>
+                        <path d="M7.5 7.2L10.8 16"></path>
+                        <path d="M16.5 7.2L13.2 16"></path>
+                        <path d="M8 6h8"></path>
+                        <circle cx="12" cy="12" r="2.2"></circle>
+                    </svg>
+                </span>
+                <span class="menu-label">Site Map (Disabled)</span>
+            </button>
+        </nav>
+
+        <!-- Bottom-anchored actions/status -->
+        <div class="sidebar-bottom">
+            <button class="menu-item" onclick="selectView('settingsView', this)">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.3 2.3-3-3z"></path>
+                    </svg>
+                </span>
+                <span class="menu-label">Settings</span>
+            </button>
+            <div class="sidebar-version">v1.0.1</div>
+        </div>
+    </aside>
+
+    <!-- Main area with switchable views -->
+    <main class="main-content">
+        <!-- Dashboard view: scan controls + miner table -->
+        <section id="dashboardView" class="view-panel active">
+            <div class="container">
+                <h2 class="app-title">The Miner Locator</h2>
+                
+                <div class="controls">
+                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                        <div class="control-group">
+                            <label for="rangeInput">Quick IP Range</label>
+                            <input type="text" id="rangeInput" placeholder="Enter Range">
+                        </div>
+                        <button class="secondary" onclick="saveQuickRangeToSavedRanges()" id="saveQuickRangeBtn" disabled>Save</button>
+                        <button onclick="startScan()" id="scanBtn">Scan Network</button>
+                        <button class="secondary" onclick="stopScan()" id="stopScanBtn" disabled>Stop Scan</button>
+                        <button class="secondary" onclick="loadTestData()" id="testBtn">Load Test Data</button>
+                        <span id="status">Ready.</span>
+                    </div>
+                </div>
+
+                <div class="table-tools">
+                    <div class="column-toolbox" aria-label="Column tools">
+                        <button class="column-tool-label" type="button" onclick="openModal()" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
+                    </div>
+                    <button id="editModeToggleBtn" class="edit-mode-toggle" type="button" onclick="toggleEditMode()" title="Toggle edit mode for sidebar and columns" aria-label="Toggle edit mode">Edit Mode</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr id="tableHeaderRow">
+                                </tr>
+                        </thead>
+                        <tbody id="minerTableBody">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- IP range configuration and saved presets -->
+        <section id="savedRangesView" class="view-panel">
+            <div class="ip-ranges-panel">
+                <h3>IP Ranges</h3>
+
+                <div class="range-config-grid">
+                    <div class="range-field">
+                        <label for="rangeTitleInput">Range Title</label>
+                        <input id="rangeTitleInput" type="text" placeholder="Description">
+                    </div>
+                    <div class="range-field">
+                        <label for="directRangeInput">IP Range</label>
+                        <input id="directRangeInput" type="text" placeholder="Enter Range" oninput="updateRangeBuilderPreview()">
+                    </div>
+                    <div class="range-actions-inline">
+                        <button type="button" class="secondary" onclick="saveRangeFromBuilder()">Save</button>
+                        <button type="button" class="secondary" onclick="clearRangeBuilderInputs()">Clear</button>
+                    </div>
+                </div>
+
+                <div id="rangeBuilderPreview" class="range-preview">Ready.</div>
+
+                <div class="saved-range-list" id="savedRangesList"></div>
+            </div>
+        </section>
+
+        <!-- Flagged miners view mirrors dashboard layout -->
+        <section id="flaggedMinersView" class="view-panel">
+            <div class="container">
+                <h2 class="app-title">Flagged Miners</h2>
+
+                <div class="table-tools">
+                    <div class="column-toolbox" aria-label="Column tools">
+                        <button class="column-tool-label" type="button" onclick="openModal()" title="Edit columns" aria-label="Edit columns">Edit Columns</button>
+                    </div>
+                    <button id="flaggedEditModeToggleBtn" class="edit-mode-toggle" type="button" onclick="toggleEditMode()" title="Toggle edit mode for sidebar and columns" aria-label="Toggle edit mode">Edit Mode</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr id="flaggedTableHeaderRow"></tr>
+                        </thead>
+                        <tbody id="flaggedMinerTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Site Map is temporarily disabled -->
+        <section id="siteMapView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Site Map</h3>
+                <p>This feature is temporarily disabled and will be revisited later.</p>
+            </div>
+        </section>
+
+        <!-- Settings view placeholder -->
+        <section id="settingsView" class="view-panel">
+            <div class="placeholder-card">
+                <h3>Settings</h3>
+                <p>Scanner speed and safety options.</p>
+                <div class="range-field" style="max-width: 280px; margin-top: 12px;">
+                    <label for="scanConcurrencyInput">Scan Concurrency</label>
+                    <input id="scanConcurrencyInput" type="number" min="1" max="128" step="1" value="48" oninput="handleScanConcurrencyInput()">
+                </div>
+                <p id="scanConcurrencyHint" style="margin: 8px 0 0; color: var(--status-color); font-size: 13px;">Higher is faster but can increase network load.</p>
+                <div class="range-actions" style="margin-top: 10px;">
+                    <button type="button" class="secondary" onclick="resetScanConcurrencySetting()">Reset to Default</button>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<!-- Column-management modal -->
+<div class="modal-overlay" id="colModal">
+    <div class="modal">
+        <h3>Manage Columns</h3>
+        <p style="font-size: 13px; color: var(--status-color); margin-bottom: 15px;">Drag to reorder. Check to show/hide.</p>
+        <div id="colList"></div>
+        <div class="modal-footer">
+            <button id="applyBtn" onclick="applyChanges()" disabled>Apply</button>
+            <button class="secondary" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // SSE connection + table state
+    let eventSource;
+    let scanInProgress = false;
+    let minersData = []; 
+    let sortCol = 'ip';  
+    let sortAsc = true; 
+    let columnDragEnabled = false;
+    let editModeEnabled = false;
+    let sidebarResizing = false;
+    let sidebarResizeStart = 0;
+    const defaultSidebarWidth = 46;
+    const minSidebarWidth = 46;
+    const maxSidebarWidth = 220;
+    const expandThreshold = 100;
+    const sidebarWidthStorageKey = 'minerLocator.sidebarWidth';
+
+    // Used to prevent sorting when finishing a drag
+    let isDraggingHeader = false; 
+    let draggedHeaderId = null;
+    let headerDropTarget = null;
+    const headerSnapZonePx = 18;
+    const headerSnapZoneRatio = 0.24;
+
+    // Master column configuration for table + modal
+    let columns = [
+        { id: 'ip', label: 'IP Address', visible: true },
+        { id: 'status', label: 'Status', visible: true },
+        { id: 'hostname', label: 'Hostname', visible: true },
+        { id: 'mac', label: 'MAC Address', visible: false },
+        { id: 'ipMode', label: 'IP Mode', visible: false },
+        { id: 'os', label: 'OS', visible: false },
+        { id: 'osVersion', label: 'OS Version', visible: false },
+        { id: 'minerType', label: 'Miner Type', visible: true },
+        { id: 'cbType', label: 'Ctrl Board', visible: false },
+        { id: 'psuInfo', label: 'PSU Info', visible: false },
+        { id: 'temp', label: 'Temp', visible: true },
+        { id: 'fans', label: 'Fan Speeds', visible: false },
+        { id: 'fanStatus', label: 'Fans Active', visible: false },
+        { id: 'voltage', label: 'Voltage', visible: false },
+        { id: 'frequencyMHz', label: 'Frequency (MHz)', visible: false },
+        { id: 'hashrate', label: 'Hashrate (TH/s)', visible: true },
+        { id: 'activeHashboards', label: 'Active Boards', visible: false },
+        { id: 'hashboards', label: 'Hashboards', visible: true },
+        { id: 'pools', label: 'Pools', visible: true }
+    ];
+
+    let pendingColumns = []; 
+    let dragStartIndex = -1;
+    let savedRanges = [];
+    let selectedSavedRangeIds = [];
+    let flaggedMinerIps = [];
+    let quickRangeOverrideActive = false;
+    let suppressQuickRangeInputHandler = false;
+    let siteMapItems = [];
+    let siteMapCounters = { building: 1, rack: 1, miner: 1 };
+    let activeSiteMapDrag = null;
+    let activeSiteMapResize = null;
+    let selectedSiteMapItemId = null;
+    let siteMapLayoutLocked = false;
+    let siteMapEditMode = true;
+    const siteMapStorageKey = 'minerLocator.siteMapLayout';
+    const scanConcurrencyStorageKey = 'minerLocator.scanConcurrency';
+    const defaultScanConcurrency = 48;
+    const minScanConcurrency = 1;
+    const maxScanConcurrency = 128;
+    const flaggedMinerStorageKey = 'minerLocator.flaggedMinerIps';
+    let scanConcurrency = defaultScanConcurrency;
+
+    // Initial render on page load
+    window.onload = () => {
+        initFlaggedMiners();
+        renderHeaders();
+        renderTable();
+        // Validate current range input on load
+        const rangeInput = document.getElementById('rangeInput');
+        rangeInput.addEventListener('input', () => handleQuickRangeInput());
+        updateRangeInfo();
+        initSavedRangesManager();
+        updateRangeBuilderPreview();
+        initScanConcurrencySetting();
+        initSidebarResize();
+        // Site Map intentionally disabled for now.
+    };
+
+    function clampScanConcurrency(value) {
+        const parsed = parseInt(String(value), 10);
+        if (!Number.isFinite(parsed)) return defaultScanConcurrency;
+        return Math.max(minScanConcurrency, Math.min(maxScanConcurrency, parsed));
+    }
+
+    function updateScanConcurrencyHint() {
+        const hint = document.getElementById('scanConcurrencyHint');
+        if (!hint) return;
+
+        let profile = 'Balanced';
+        if (scanConcurrency <= 24) profile = 'Gentle';
+        else if (scanConcurrency >= 80) profile = 'Aggressive';
+
+        hint.innerText = `Current: ${scanConcurrency} (${profile}). Higher is faster but can increase switch load.`;
+    }
+
+    function persistScanConcurrencySetting() {
+        localStorage.setItem(scanConcurrencyStorageKey, String(scanConcurrency));
+    }
+
+    function initScanConcurrencySetting() {
+        const input = document.getElementById('scanConcurrencyInput');
+        if (!input) return;
+
+        const raw = localStorage.getItem(scanConcurrencyStorageKey);
+        scanConcurrency = clampScanConcurrency(raw || defaultScanConcurrency);
+        input.value = String(scanConcurrency);
+        updateScanConcurrencyHint();
+    }
+
+    function handleScanConcurrencyInput() {
+        const input = document.getElementById('scanConcurrencyInput');
+        if (!input) return;
+
+        scanConcurrency = clampScanConcurrency(input.value);
+        input.value = String(scanConcurrency);
+        persistScanConcurrencySetting();
+        updateScanConcurrencyHint();
+    }
+
+    function syncEditModeButtons() {
+        const buttonIds = ['editModeToggleBtn', 'flaggedEditModeToggleBtn'];
+        buttonIds.forEach((id) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.classList.toggle('active', editModeEnabled);
+            btn.setAttribute('aria-pressed', String(editModeEnabled));
+            btn.innerText = editModeEnabled ? 'Edit Mode Active' : 'Edit Mode';
+        });
+    }
+
+    function toggleEditMode() {
+        editModeEnabled = !editModeEnabled;
+        columnDragEnabled = editModeEnabled;
+        isDraggingHeader = false;
+        draggedHeaderId = null;
+        syncEditModeButtons();
+        
+        if (editModeEnabled) {
+            document.body.classList.add('edit-mode-active');
+            // Disable scan-related buttons
+            disableScanButtons();
+        } else {
+            document.body.classList.remove('edit-mode-active');
+            // Re-enable scan-related buttons if appropriate
+            enableScanButtons();
+        }
+
+        renderHeaders();
+    }
+
+    function disableScanButtons() {
+        const buttons = [
+            'scanBtn',
+            'stopScanBtn',
+            'saveQuickRangeBtn',
+            'testBtn'
+        ];
+        buttons.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.disabled = true;
+        });
+        const rangeInput = document.getElementById('rangeInput');
+        if (rangeInput) rangeInput.disabled = true;
+    }
+
+    function enableScanButtons() {
+        const rangeInput = document.getElementById('rangeInput');
+        if (rangeInput) rangeInput.disabled = false;
+        updateRangeInfo();
+        const testBtn = document.getElementById('testBtn');
+        if (testBtn) testBtn.disabled = false;
+        const stopBtn = document.getElementById('stopScanBtn');
+        if (stopBtn && !scanInProgress) stopBtn.disabled = true;
+    }
+
+    function initSidebarResize() {
+        loadSidebarWidth();
+        const handle = document.getElementById('sidebarResizeHandle');
+        if (!handle) return;
+        
+        handle.addEventListener('mousedown', beginSidebarResize);
+        document.addEventListener('mousemove', onSidebarResizeMove);
+        document.addEventListener('mouseup', endSidebarResize);
+    }
+
+    function loadSidebarWidth() {
+        try {
+            const stored = localStorage.getItem(sidebarWidthStorageKey);
+            if (stored) {
+                const width = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, parseInt(stored, 10)));
+                setSidebarWidth(width);
+            }
+        } catch (err) {
+            setSidebarWidth(defaultSidebarWidth);
+        }
+    }
+
+    function setSidebarWidth(width) {
+        document.documentElement.style.setProperty('--sidebar-width', width + 'px');
+        // Show/hide labels based on width
+        if (width > expandThreshold) {
+            document.body.classList.add('sidebar-expanded');
+        } else {
+            document.body.classList.remove('sidebar-expanded');
+        }
+    }
+
+    function persistSidebarWidth() {
+        const currentWidth = getCSSVariableValue('--sidebar-width');
+        if (currentWidth) {
+            localStorage.setItem(sidebarWidthStorageKey, currentWidth);
+        }
+    }
+
+    function getCSSVariableValue(varName) {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        return value ? value.replace('px', '') : null;
+    }
+
+    function beginSidebarResize(e) {
+        if (!editModeEnabled) return;
+        sidebarResizing = true;
+        sidebarResizeStart = e.clientX;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    }
+
+    function onSidebarResizeMove(e) {
+        if (!sidebarResizing) return;
+        const delta = e.clientX - sidebarResizeStart;
+        const currentWidth = parseFloat(getCSSVariableValue('--sidebar-width')) || defaultSidebarWidth;
+        const newWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, currentWidth + delta));
+        setSidebarWidth(newWidth);
+        sidebarResizeStart = e.clientX;
+    }
+
+    function endSidebarResize() {
+        if (!sidebarResizing) return;
+        sidebarResizing = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        persistSidebarWidth();
+    }
+
+    function resetScanConcurrencySetting() {
+        scanConcurrency = defaultScanConcurrency;
+        const input = document.getElementById('scanConcurrencyInput');
+        if (input) input.value = String(scanConcurrency);
+        persistScanConcurrencySetting();
+        updateScanConcurrencyHint();
+    }
+
+    function handleQuickRangeInput() {
+        if (suppressQuickRangeInputHandler) return;
+
+        const quickValue = document.getElementById('rangeInput').value.trim();
+        quickRangeOverrideActive = quickValue.length > 0;
+        updateRangeInfo();
+    }
+
+    function setQuickRangeInputValue(value) {
+        const quickInput = document.getElementById('rangeInput');
+        suppressQuickRangeInputHandler = true;
+        quickInput.value = value;
+        suppressQuickRangeInputHandler = false;
+    }
+
+    // Switches between sidebar views and updates active menu state
+    function selectView(viewId, clickedButton) {
+        if (viewId === 'siteMapView') return;
+        document.querySelectorAll('.view-panel').forEach(panel => panel.classList.remove('active'));
+        document.querySelectorAll('.menu-item').forEach(item => item.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+        clickedButton.classList.add('active');
+    }
+
+    // --- Main Table Header Drag Logic ---
+    function headerDragStart(e, id) {
+        if (!columnDragEnabled) {
+            e.preventDefault();
+            return;
+        }
+
+        isDraggingHeader = true;
+        draggedHeaderId = id;
+        headerDropTarget = null;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', id);
+        setTimeout(() => e.target.classList.add('header-dragging'), 0);
+    }
+
+    function clearHeaderDropMarkers() {
+        document.querySelectorAll('th.header-drop-before, th.header-drop-after').forEach(el => {
+            el.classList.remove('header-drop-before', 'header-drop-after');
+        });
+    }
+
+    function getHeaderDropPlacement(el, clientX) {
+        const rect = el.getBoundingClientRect();
+        const localX = clientX - rect.left;
+        const snapZone = Math.min(rect.width / 2, Math.max(headerSnapZonePx, rect.width * headerSnapZoneRatio));
+
+        // Magnetic edge zones: lock hard to before/after near column boundaries.
+        if (localX <= snapZone) return 'before';
+        if (localX >= rect.width - snapZone) return 'after';
+
+        // In the center band, still resolve by midpoint for predictable behavior.
+        return localX < rect.width / 2 ? 'before' : 'after';
+    }
+
+    function headerDragOver(e, el) {
+        e.preventDefault();
+        if (!columnDragEnabled || !draggedHeaderId) return;
+
+        e.dataTransfer.dropEffect = 'move';
+
+        const targetId = el.dataset.colId;
+        if (!targetId || targetId === draggedHeaderId) {
+            clearHeaderDropMarkers();
+            headerDropTarget = null;
+            return;
+        }
+
+        const placement = getHeaderDropPlacement(el, e.clientX);
+        clearHeaderDropMarkers();
+        el.classList.add(placement === 'before' ? 'header-drop-before' : 'header-drop-after');
+        headerDropTarget = { id: targetId, placement };
+    }
+
+    function getReorderedColumnsWithPlacement(sourceId, targetId, placement) {
+        const sourceIndex = columns.findIndex(c => c.id === sourceId);
+        const targetIndex = columns.findIndex(c => c.id === targetId);
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return null;
+
+        const nextColumns = [...columns];
+        const [draggedColumn] = nextColumns.splice(sourceIndex, 1);
+
+        let insertionIndex = targetIndex;
+        if (sourceIndex < targetIndex) insertionIndex -= 1;
+        if (placement === 'after') insertionIndex += 1;
+
+        insertionIndex = Math.max(0, Math.min(nextColumns.length, insertionIndex));
+        nextColumns.splice(insertionIndex, 0, draggedColumn);
+        return nextColumns;
+    }
+
+    function headerDrop(e) {
+        e.preventDefault();
+
+        if (!draggedHeaderId || !headerDropTarget) {
+            clearHeaderDropMarkers();
+            return;
+        }
+
+        const nextColumns = getReorderedColumnsWithPlacement(
+            draggedHeaderId,
+            headerDropTarget.id,
+            headerDropTarget.placement
+        );
+        clearHeaderDropMarkers();
+        if (!nextColumns) return;
+
+        columns = nextColumns;
+        
+        renderHeaders();
+        renderTable();
+    }
+
+    function headerDragEnd(e) {
+        e.target.classList.remove('header-dragging');
+        clearHeaderDropMarkers();
+        
+        // Give the browser 50ms to realize we dropped it before allowing clicks again
+        // This prevents the table from accidentally sorting when you drop a column
+        setTimeout(() => { 
+            isDraggingHeader = false; 
+            draggedHeaderId = null; 
+            headerDropTarget = null;
+        }, 50);
+    }
+
+
+    // --- Modal Logic ---
+    function openModal() { 
+        pendingColumns = JSON.parse(JSON.stringify(columns)); 
+        document.getElementById('applyBtn').disabled = true; 
+        renderModalList();
+        document.getElementById('colModal').style.display = 'flex'; 
+    }
+
+    function closeModal() { document.getElementById('colModal').style.display = 'none'; }
+
+    function applyChanges() {
+        columns = JSON.parse(JSON.stringify(pendingColumns));
+        renderHeaders();
+        renderTable();
+        document.getElementById('applyBtn').disabled = true; 
+    }
+
+    function markAsChanged() { document.getElementById('applyBtn').disabled = false; }
+    
+    function renderModalList() {
+        const list = document.getElementById('colList');
+        list.innerHTML = '';
+        pendingColumns.forEach((col, index) => {
+            list.innerHTML += `
+                <div class="col-item" draggable="true"
+                     ondragstart="modalDragStart(event, ${index})"
+                     ondragover="modalDragOver(event)"
+                     ondragenter="modalDragEnter(event, this)"
+                     ondragleave="modalDragLeave(event, this)"
+                     ondrop="modalDrop(event, ${index})"
+                     ondragend="modalDragEnd(event)">
+                    <span class="drag-handle">☰</span>
+                    <input type="checkbox" ${col.visible ? 'checked' : ''} onchange="toggleCol(${index})">
+                    <span class="label-text">${col.label}</span>
+                </div>
+            `;
+        });
+    }
+
+    function toggleCol(index) {
+        pendingColumns[index].visible = !pendingColumns[index].visible;
+        markAsChanged(); 
+    }
+
+    function modalDragStart(e, index) {
+        dragStartIndex = index;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', index); 
+        setTimeout(() => { e.target.classList.add('collapsed-slot'); }, 0);
+    }
+    function modalDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+    function modalDragEnter(e, el) { e.preventDefault(); el.classList.add('drag-over'); }
+    function modalDragLeave(e, el) { if (!el.contains(e.relatedTarget)) el.classList.remove('drag-over'); }
+    
+    function modalDrop(e, dropIndex) {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drag-over');
+        if (dragStartIndex === dropIndex) return;
+        const item = pendingColumns.splice(dragStartIndex, 1)[0];
+        pendingColumns.splice(dropIndex, 0, item);
+        markAsChanged(); 
+        renderModalList(); 
+    }
+    
+    function modalDragEnd(e) {
+        e.target.classList.remove('collapsed-slot');
+        document.querySelectorAll('.col-item').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    // --- Table Rendering Logic ---
+    function renderHeadersInto(headerRowId) {
+        const headerRow = document.getElementById(headerRowId);
+        if (!headerRow) return;
+        headerRow.innerHTML = '';
+        
+        columns.filter(c => c.visible).forEach(col => {
+            const draggable = columnDragEnabled ? 'true' : 'false';
+            const dragClass = columnDragEnabled ? 'header-draggable' : '';
+            const ascActive = sortCol === col.id && sortAsc ? 'active' : '';
+            const descActive = sortCol === col.id && !sortAsc ? 'active' : '';
+            
+            headerRow.innerHTML += `
+                <th class="${dragClass}" draggable="${draggable}" data-col-id="${col.id}"
+                    ondragstart="headerDragStart(event, '${col.id}')"
+                    ondragover="headerDragOver(event, this)"
+                    ondrop="headerDrop(event)"
+                    ondragend="headerDragEnd(event)">
+                    <span class="header-content">
+                        <span class="header-label">${col.label}</span>
+                        <span class="sort-controls">
+                            <button class="sort-arrow-btn ${ascActive}" type="button" onclick="setSortDirection('${col.id}', true); event.stopPropagation();" aria-label="Sort ${col.label} ascending">▲</button>
+                            <button class="sort-arrow-btn ${descActive}" type="button" onclick="setSortDirection('${col.id}', false); event.stopPropagation();" aria-label="Sort ${col.label} descending">▼</button>
+                        </span>
+                    </span>
+                </th>
+            `;
+        });
+
+        headerRow.innerHTML += `<th class="header-action-cell">Flag</th>`;
+    }
+
+    function renderHeaders() {
+        renderHeadersInto('tableHeaderRow');
+        renderHeadersInto('flaggedTableHeaderRow');
+    }
+
+    function getSortedMinersList(miners) {
+        const list = [...miners];
+        list.sort((a, b) => {
+            let valA = a[sortCol];
+            let valB = b[sortCol];
+
+            if (sortCol === 'ip') {
+                valA = ipToNum(valA);
+                valB = ipToNum(valB);
+            } else if (['hashrate', 'temp'].includes(sortCol)) {
+                valA = parseFloat(valA) || 0;
+                valB = parseFloat(valB) || 0;
+            }
+
+            if (valA < valB) return sortAsc ? -1 : 1;
+            if (valA > valB) return sortAsc ? 1 : -1;
+            return 0;
+        });
+        return list;
+    }
+
+    function renderTableBody(bodyId, miners) {
+        const tbody = document.getElementById(bodyId);
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        const visibleCols = columns.filter(c => c.visible);
+        miners.forEach(miner => {
+            const tr = document.createElement('tr');
+            let rowHtml = '';
+
+            visibleCols.forEach(col => {
+                if (col.id === 'status') {
+                    rowHtml += `<td class="online">Online</td>`;
+                } else if (col.id === 'ip') {
+                    rowHtml += `<td><strong><a href="http://${miner.ip}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${miner.ip}</a></strong></td>`;
+                } else if (col.id === 'hashrate') {
+                    const hr = miner.hashrate;
+                    rowHtml += `<td>${hr && hr !== 'N/A' ? hr + ' TH/s' : 'N/A'}</td>`;
+                } else if (col.id === 'fanStatus') {
+                    const fanStatus = miner.fanStatus || 'N/A';
+                    const match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(String(fanStatus));
+                    const isAlert = match && Number(match[1]) < Number(match[2]);
+                    rowHtml += `<td${isAlert ? ' class="fan-alert"' : ''}>${fanStatus}</td>`;
+                } else {
+                    rowHtml += `<td>${miner[col.id] || 'N/A'}</td>`;
+                }
+            });
+
+            const flagged = isMinerFlagged(miner.ip);
+            const safeIp = escapeHtml(miner.ip || 'N/A');
+            rowHtml += `
+                <td class="flag-action-cell">
+                    <button
+                        type="button"
+                        class="flag-toggle-btn${flagged ? ' active' : ''}"
+                        onclick='toggleFlaggedMiner(${JSON.stringify(String(miner.ip || ''))}); event.stopPropagation();'
+                        aria-label="${flagged ? 'Unflag' : 'Flag'} miner ${safeIp}"
+                    >${flagged ? 'Flagged' : 'Flag'}</button>
+                </td>
+            `;
+
+            tr.innerHTML = rowHtml;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderTable() {
+        renderTableBody('minerTableBody', getSortedMinersList(minersData));
+
+        const flaggedMiners = getSortedMinersList(
+            flaggedMinerIps.map((ip) => {
+                const miner = minersData.find(item => String(item.ip || '') === ip);
+                if (miner) return miner;
+                return {
+                    ip,
+                    status: 'online',
+                    hostname: 'N/A',
+                    mac: 'N/A',
+                    ipMode: 'N/A',
+                    os: 'N/A',
+                    osVersion: 'N/A',
+                    minerType: 'N/A',
+                    cbType: 'N/A',
+                    psuInfo: 'N/A',
+                    temp: 'N/A',
+                    fans: 'N/A',
+                    fanStatus: 'N/A',
+                    voltage: 'N/A',
+                    frequencyMHz: 'N/A',
+                    hashrate: 'N/A',
+                    activeHashboards: 'N/A',
+                    hashboards: 'N/A',
+                    pools: 'N/A'
+                };
+            })
+        );
+        renderTableBody('flaggedMinerTableBody', flaggedMiners);
+    }
+
+    function ipToNum(ip) {
+        const parts = String(ip).trim().split('.');
+        if (parts.length !== 4) return NaN;
+        let value = 0;
+
+        for (const part of parts) {
+            if (!/^\d+$/.test(part)) return NaN;
+            const octet = parseInt(part, 10);
+            if (octet < 0 || octet > 255) return NaN;
+            value = (value << 8) + octet;
+        }
+
+        return value >>> 0;
+    }
+
+    function numToIp(num) {
+        return [(num >>> 24) & 0xFF, (num >>> 16) & 0xFF, (num >>> 8) & 0xFF, num & 0xFF].join('.');
+    }
+
+    function getBuiltRangeExpression() {
+        const expression = document.getElementById('directRangeInput').value.trim();
+        if (!expression) return { hint: 'Examples: 10.10.1.10-10.10.1.200, 10.10.2.0/24, 10.10.3.14' };
+        return { expression };
+    }
+
+    function updateRangeBuilderPreview() {
+        const preview = document.getElementById('rangeBuilderPreview');
+        const built = getBuiltRangeExpression();
+
+        if (built.hint) {
+            preview.innerText = built.hint;
+            preview.style.color = '#6b7280';
+            return;
+        }
+
+        if (built.error) {
+            preview.innerText = built.error;
+            preview.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const parsed = parseIPRangeInput(built.expression);
+        if (parsed.error) {
+            preview.innerText = parsed.error;
+            preview.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const count = totalIPsInRanges(parsed.ranges);
+        preview.innerText = `Preview: ${built.expression} (${count} IP${count === 1 ? '' : 's'})`;
+        preview.style.color = 'var(--status-color)';
+    }
+
+    function applyRangeBuilderToScanner() {
+        const built = getBuiltRangeExpression();
+        const statusEl = document.getElementById('status');
+        if (built.error) {
+            statusEl.innerText = built.error;
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+
+        document.getElementById('rangeInput').value = built.expression;
+        updateRangeInfo();
+        statusEl.innerText = 'Applied range to scanner input.';
+        statusEl.style.color = 'var(--status-color)';
+    }
+
+    function initSavedRangesManager() {
+        try {
+            const raw = localStorage.getItem('minerLocator.savedRanges');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    savedRanges = parsed.filter(item => item && item.id && item.title && item.expression);
+                }
+            }
+            const selectedRaw = localStorage.getItem('minerLocator.selectedRangeIds');
+            if (selectedRaw) {
+                const parsedSelected = JSON.parse(selectedRaw);
+                if (Array.isArray(parsedSelected)) selectedSavedRangeIds = parsedSelected;
+            } else {
+                const legacySingle = localStorage.getItem('minerLocator.selectedRangeId');
+                if (legacySingle) selectedSavedRangeIds = [legacySingle];
+            }
+        } catch (err) {
+            savedRanges = [];
+            selectedSavedRangeIds = [];
+        }
+
+        selectedSavedRangeIds = selectedSavedRangeIds.filter(id => savedRanges.some(r => r.id === id));
+
+        renderSavedRangesList();
+    }
+
+    function persistSavedRanges() {
+        localStorage.setItem('minerLocator.savedRanges', JSON.stringify(savedRanges));
+        if (selectedSavedRangeIds.length > 0) {
+            localStorage.setItem('minerLocator.selectedRangeIds', JSON.stringify(selectedSavedRangeIds));
+        } else {
+            localStorage.removeItem('minerLocator.selectedRangeIds');
+        }
+        // Cleanup legacy single-select key
+        localStorage.removeItem('minerLocator.selectedRangeId');
+    }
+
+    function applySelectedRangesToScannerInput(showStatus = true) {
+        const selectedItems = savedRanges.filter(r => selectedSavedRangeIds.includes(r.id));
+        const combinedExpression = selectedItems.map(item => item.expression).join(',');
+        const statusEl = document.getElementById('status');
+
+        if (quickRangeOverrideActive) {
+            if (showStatus) {
+                statusEl.innerText = 'Quick IP Range override is active.';
+                statusEl.style.color = 'var(--status-color)';
+            }
+            return;
+        }
+
+        if (combinedExpression) {
+            setQuickRangeInputValue(combinedExpression);
+            updateRangeInfo();
+            if (showStatus) {
+                statusEl.innerText = `Selected ${selectedItems.length} saved range${selectedItems.length === 1 ? '' : 's'}.`;
+                statusEl.style.color = 'var(--status-color)';
+            }
+        } else if (showStatus) {
+            statusEl.innerText = 'No saved ranges selected.';
+            statusEl.style.color = 'var(--status-color)';
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+
+    function initFlaggedMiners() {
+        try {
+            const raw = localStorage.getItem(flaggedMinerStorageKey);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    flaggedMinerIps = Array.from(new Set(parsed
+                        .map(ip => String(ip || '').trim())
+                        .filter(Boolean)));
+                }
+            }
+        } catch (_err) {
+            flaggedMinerIps = [];
+        }
+
+        // Flagged miner table will render when main table renders.
+    }
+
+    function persistFlaggedMiners() {
+        localStorage.setItem(flaggedMinerStorageKey, JSON.stringify(flaggedMinerIps));
+    }
+
+    function isMinerFlagged(ip) {
+        return flaggedMinerIps.includes(String(ip || '').trim());
+    }
+
+    function toggleFlaggedMiner(ip) {
+        const normalizedIp = String(ip || '').trim();
+        if (!normalizedIp) return;
+
+        const currentIndex = flaggedMinerIps.indexOf(normalizedIp);
+        if (currentIndex >= 0) {
+            flaggedMinerIps.splice(currentIndex, 1);
+        } else {
+            flaggedMinerIps.unshift(normalizedIp);
+        }
+
+        persistFlaggedMiners();
+        renderTable();
+    }
+
+    function saveRangeFromBuilder() {
+        const titleInput = document.getElementById('rangeTitleInput');
+        const title = titleInput.value.trim();
+        const built = getBuiltRangeExpression();
+        const statusEl = document.getElementById('status');
+
+        if (!title) {
+            statusEl.innerText = 'Please enter a range title.';
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+        if (built.error) {
+            statusEl.innerText = built.error;
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const parsed = parseIPRangeInput(built.expression);
+        if (parsed.error) {
+            statusEl.innerText = parsed.error;
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const count = totalIPsInRanges(parsed.ranges);
+        const item = {
+            id: Date.now().toString(36),
+            title,
+            expression: built.expression,
+            count
+        };
+
+        savedRanges.unshift(item);
+        persistSavedRanges();
+        renderSavedRangesList();
+        statusEl.innerText = `Saved IP range: ${title}`;
+        statusEl.style.color = 'var(--success-color)';
+    }
+
+    function saveQuickRangeToSavedRanges() {
+        const quickInput = document.getElementById('rangeInput');
+        const expression = quickInput.value.trim();
+        const statusEl = document.getElementById('status');
+
+        if (!expression) {
+            statusEl.innerText = 'Enter a Quick IP Range first.';
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const parsed = parseIPRangeInput(expression);
+        if (parsed.error) {
+            statusEl.innerText = parsed.error;
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const normalizedExpression = expression.replace(/\s+/g, '');
+        const alreadySaved = savedRanges.some(item => String(item.expression || '').replace(/\s+/g, '') === normalizedExpression);
+        if (alreadySaved) {
+            statusEl.innerText = 'This IP range is already saved.';
+            statusEl.style.color = 'var(--status-color)';
+            return;
+        }
+
+        const title = 'untitled';
+
+        const count = totalIPsInRanges(parsed.ranges);
+        savedRanges.unshift({
+            id: Date.now().toString(36),
+            title,
+            expression,
+            count
+        });
+
+        persistSavedRanges();
+        renderSavedRangesList();
+        statusEl.innerText = `Saved IP range: ${title}`;
+        statusEl.style.color = 'var(--success-color)';
+    }
+
+    function clearRangeBuilderInputs() {
+        document.getElementById('rangeTitleInput').value = '';
+        document.getElementById('directRangeInput').value = '';
+        updateRangeBuilderPreview();
+    }
+
+    function selectSavedRange(rangeId, checked) {
+        if (!checked) {
+            selectedSavedRangeIds = selectedSavedRangeIds.filter(id => id !== rangeId);
+            persistSavedRanges();
+            renderSavedRangesList();
+            applySelectedRangesToScannerInput();
+            return;
+        }
+
+        if (!selectedSavedRangeIds.includes(rangeId)) selectedSavedRangeIds.push(rangeId);
+        persistSavedRanges();
+        renderSavedRangesList();
+        applySelectedRangesToScannerInput();
+    }
+
+    function editSavedRange(rangeId) {
+        const item = savedRanges.find(r => r.id === rangeId);
+        if (!item) return;
+
+        const nextTitle = prompt('Edit range title:', item.title);
+        if (nextTitle === null) return;
+        const title = nextTitle.trim();
+        if (!title) {
+            document.getElementById('status').innerText = 'Range title cannot be empty.';
+            document.getElementById('status').style.color = 'var(--error-color)';
+            return;
+        }
+
+        const nextExpression = prompt('Edit IP range expression:', item.expression);
+        if (nextExpression === null) return;
+        const expression = nextExpression.trim();
+        const parsed = parseIPRangeInput(expression);
+        if (parsed.error) {
+            document.getElementById('status').innerText = parsed.error;
+            document.getElementById('status').style.color = 'var(--error-color)';
+            return;
+        }
+
+        item.title = title;
+        item.expression = expression;
+        item.count = totalIPsInRanges(parsed.ranges);
+        persistSavedRanges();
+        renderSavedRangesList();
+
+        if (selectedSavedRangeIds.includes(rangeId)) applySelectedRangesToScannerInput(false);
+
+        document.getElementById('status').innerText = `Updated saved range: ${item.title}`;
+        document.getElementById('status').style.color = 'var(--success-color)';
+    }
+
+    function deleteSavedRange(rangeId) {
+        savedRanges = savedRanges.filter(r => r.id !== rangeId);
+        selectedSavedRangeIds = selectedSavedRangeIds.filter(id => id !== rangeId);
+        persistSavedRanges();
+        renderSavedRangesList();
+        applySelectedRangesToScannerInput(false);
+    }
+
+    function renderSavedRangesList() {
+        const list = document.getElementById('savedRangesList');
+        if (!list) return;
+
+        const headerRow = `
+            <div class="saved-range-row saved-range-header">
+                <div>Title</div>
+                <div>IP Range</div>
+                <div></div>
+            </div>
+        `;
+
+        if (savedRanges.length === 0) {
+            list.innerHTML = `${headerRow}<div class="saved-range-row"><div class="saved-range-expression">No saved IP ranges yet.</div></div>`;
+            return;
+        }
+
+        list.innerHTML = headerRow + savedRanges.map(item => `
+            <div class="saved-range-row">
+                <div>
+                    <div class="saved-range-title">${escapeHtml(item.title)}</div>
+                    <div class="range-inline-meta">${item.count} IP${item.count === 1 ? '' : 's'}</div>
+                </div>
+                <div class="saved-range-expression">${escapeHtml(item.expression)}</div>
+                <div class="saved-range-actions">
+                    <input type="checkbox" aria-label="Select ${escapeHtml(item.title)}" ${selectedSavedRangeIds.includes(item.id) ? 'checked' : ''} onchange="selectSavedRange('${item.id}', this.checked)">
+                    <button type="button" class="saved-action-icon" onclick="editSavedRange('${item.id}')" aria-label="Edit ${escapeHtml(item.title)}" title="Edit">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 20h4l10-10-4-4L4 16v4z"></path>
+                            <path d="M12 6l4 4"></path>
+                        </svg>
+                    </button>
+                    <button type="button" class="saved-action-icon" onclick="deleteSavedRange('${item.id}')" aria-label="Delete ${escapeHtml(item.title)}" title="Delete">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M3 6h18"></path>
+                            <path d="M8 6V4h8v2"></path>
+                            <path d="M19 6l-1 14H6L5 6"></path>
+                            <path d="M10 11v6"></path>
+                            <path d="M14 11v6"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function initSiteMap() {
+        try {
+            const raw = localStorage.getItem(siteMapStorageKey);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed.items)) {
+                    siteMapItems = parsed.items.map(item => {
+                        if (!item) return item;
+                        const nextItem = { ...item };
+                        if (nextItem.type === 'building' || nextItem.type === 'rack') {
+                            if (typeof nextItem.expanded !== 'boolean') nextItem.expanded = true;
+                        }
+                        if (item && item.type === 'group') {
+                            return { ...nextItem, type: 'building', expanded: typeof nextItem.expanded === 'boolean' ? nextItem.expanded : true };
+                        }
+                        return nextItem;
+                    });
+                }
+                if (parsed.counters && typeof parsed.counters === 'object') {
+                    siteMapCounters.building = parsed.counters.building || parsed.counters.group || 1;
+                    siteMapCounters.rack = parsed.counters.rack || 1;
+                    siteMapCounters.miner = parsed.counters.miner || 1;
+                }
+                siteMapLayoutLocked = Boolean(parsed.layoutLocked);
+                siteMapEditMode = !siteMapLayoutLocked;
+            }
+        } catch (err) {
+            siteMapItems = [];
+            siteMapCounters = { building: 1, rack: 1, miner: 1 };
+            siteMapLayoutLocked = false;
+            siteMapEditMode = true;
+        }
+
+        document.addEventListener('mousemove', onSiteMapDragMove);
+        document.addEventListener('mousemove', onSiteMapResizeMove);
+        document.addEventListener('mouseup', stopSiteMapDrag);
+        document.addEventListener('mouseup', stopSiteMapResize);
+        updateSiteMapEditControls();
+        renderSiteMap();
+    }
+
+    function persistSiteMap() {
+        localStorage.setItem(siteMapStorageKey, JSON.stringify({
+            items: siteMapItems,
+            counters: siteMapCounters,
+            layoutLocked: siteMapLayoutLocked
+        }));
+    }
+
+    function isSiteMapEditable() {
+        return siteMapEditMode;
+    }
+
+    function updateSiteMapEditControls() {
+        const editBtn = document.getElementById('siteMapEditModeBtn');
+        const saveBtn = document.getElementById('siteMapSaveLayoutBtn');
+        const addBuildingBtn = document.getElementById('siteMapAddBuildingBtn');
+        const addRackBtn = document.getElementById('siteMapAddRackBtn');
+        const addMinerBtn = document.getElementById('siteMapAddMinerBtn');
+        const syncBtn = document.getElementById('siteMapSyncBtn');
+        const clearBtn = document.getElementById('siteMapClearBtn');
+        const editable = isSiteMapEditable();
+        if (editBtn) {
+            editBtn.innerText = `Edit: ${editable ? 'On' : 'Off'}`;
+            editBtn.setAttribute('aria-pressed', String(editable));
+        }
+        if (saveBtn) saveBtn.disabled = !siteMapItems.length;
+        if (addBuildingBtn) addBuildingBtn.disabled = !editable;
+        if (addRackBtn) addRackBtn.disabled = !editable;
+        if (addMinerBtn) addMinerBtn.disabled = !editable;
+        if (syncBtn) syncBtn.disabled = !editable;
+        if (clearBtn) clearBtn.disabled = !editable;
+    }
+
+    function toggleSiteMapEditMode() {
+        siteMapEditMode = !siteMapEditMode;
+        updateSiteMapEditControls();
+        updateSiteMapContextHint();
+        renderSiteMap();
+    }
+
+    function saveSiteMapLayout() {
+        siteMapLayoutLocked = true;
+        siteMapEditMode = false;
+        persistSiteMap();
+        updateSiteMapEditControls();
+        updateSiteMapContextHint('Layout saved and locked. Enable Edit Mode to make changes.');
+        renderSiteMap();
+    }
+
+    function getSiteMapItem(itemId) {
+        return siteMapItems.find(item => item.id === itemId) || null;
+    }
+
+    function getSiteMapChildren(parentId) {
+        return siteMapItems.filter(item => item.parentId === parentId);
+    }
+
+    function isSiteMapItemVisible(item) {
+        if (!item.parentId) return true;
+        const parent = getSiteMapItem(item.parentId);
+        if (!parent) return true;
+        if (parent.expanded === false) return false;
+        return isSiteMapItemVisible(parent);
+    }
+
+    function getSiteMapNodeSize(type) {
+        if (type === 'building') return { width: 340, height: 220 };
+        if (type === 'rack') return { width: 210, height: 120 };
+        return { width: 160, height: 74 };
+    }
+
+    function getSiteMapNodeDimensions(item) {
+        const defaults = getSiteMapNodeSize(item.type);
+        return {
+            width: item.width || defaults.width,
+            height: item.height || defaults.height
+        };
+    }
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function getConstrainedPosition(item, desiredX, desiredY) {
+        const mapCanvas = document.getElementById('siteMapCanvas');
+        if (!mapCanvas) return { x: desiredX, y: desiredY };
+
+        const size = getSiteMapNodeDimensions(item);
+        if (!item.parentId) {
+            return {
+                x: clamp(desiredX, 4, Math.max(4, mapCanvas.clientWidth - size.width - 4)),
+                y: clamp(desiredY, 4, Math.max(4, mapCanvas.clientHeight - size.height - 4))
+            };
+        }
+
+        const parent = getSiteMapItem(item.parentId);
+        if (!parent) {
+            return {
+                x: clamp(desiredX, 4, Math.max(4, mapCanvas.clientWidth - size.width - 4)),
+                y: clamp(desiredY, 4, Math.max(4, mapCanvas.clientHeight - size.height - 4))
+            };
+        }
+
+        const parentSize = getSiteMapNodeDimensions(parent);
+        const inset = 10;
+        const minX = parent.x + inset;
+        const minY = parent.y + 34;
+        const maxX = parent.x + parentSize.width - size.width - inset;
+        const maxY = parent.y + parentSize.height - size.height - inset;
+
+        return {
+            x: clamp(desiredX, minX, Math.max(minX, maxX)),
+            y: clamp(desiredY, minY, Math.max(minY, maxY))
+        };
+    }
+
+    function collectDescendantIds(parentId) {
+        const ids = [];
+        const queue = [parentId];
+
+        while (queue.length) {
+            const current = queue.shift();
+            const children = siteMapItems.filter(item => item.parentId === current);
+            children.forEach(child => {
+                ids.push(child.id);
+                queue.push(child.id);
+            });
+        }
+
+        return ids;
+    }
+
+    function getSelectedBuilding() {
+        const selected = getSiteMapItem(selectedSiteMapItemId);
+        if (selected && selected.type === 'building') return selected;
+        if (selected && selected.type === 'rack') return getSiteMapItem(selected.parentId);
+        if (selected && selected.type === 'miner') {
+            const rack = getSiteMapItem(selected.parentId);
+            return rack ? getSiteMapItem(rack.parentId) : null;
+        }
+        return null;
+    }
+
+    function getSelectedRack() {
+        const selected = getSiteMapItem(selectedSiteMapItemId);
+        if (selected && selected.type === 'rack') return selected;
+        if (selected && selected.type === 'miner') return getSiteMapItem(selected.parentId);
+        return null;
+    }
+
+    function toggleSiteMapExpand(itemId) {
+        const item = getSiteMapItem(itemId);
+        if (!item || !['building', 'rack'].includes(item.type)) return;
+
+        const nextExpanded = item.expanded === false;
+        item.expanded = nextExpanded;
+
+        // Keep hierarchy focused: one expanded building and one expanded rack branch at a time.
+        if (nextExpanded && item.type === 'building') {
+            siteMapItems.forEach(entry => {
+                if (entry.id !== item.id && entry.type === 'building') {
+                    entry.expanded = false;
+                }
+            });
+        }
+
+        if (nextExpanded && item.type === 'rack') {
+            siteMapItems.forEach(entry => {
+                if (entry.id !== item.id && entry.type === 'rack' && entry.parentId === item.parentId) {
+                    entry.expanded = false;
+                }
+            });
+        }
+
+        if (item.expanded === false && selectedSiteMapItemId) {
+            let cursor = getSiteMapItem(selectedSiteMapItemId);
+            while (cursor) {
+                if (cursor.id === item.id) {
+                    selectedSiteMapItemId = item.id;
+                    break;
+                }
+                cursor = cursor.parentId ? getSiteMapItem(cursor.parentId) : null;
+            }
+        }
+
+        persistSiteMap();
+        renderSiteMap();
+    }
+
+    function addSiteMapItem(type) {
+        if (!isSiteMapEditable()) {
+            updateSiteMapContextHint('Layout is locked. Enable Edit Mode to add items.');
+            return;
+        }
+
+        const mapCanvas = document.getElementById('siteMapCanvas');
+        if (!mapCanvas) return;
+
+        let parentId = null;
+        let titlePrefix = 'B';
+        let desiredX = 20 + ((siteMapItems.length % 6) * 24);
+        let desiredY = 20 + ((siteMapItems.length % 6) * 24);
+
+        if (type === 'rack') {
+            const building = getSelectedBuilding();
+            if (!building) {
+                updateSiteMapContextHint('Select a building before adding a rack.');
+                return;
+            }
+            parentId = building.id;
+            titlePrefix = 'R';
+            const children = getSiteMapChildren(building.id).filter(child => child.type === 'rack');
+            desiredX = building.x + 12 + ((children.length % 2) * 110);
+            desiredY = building.y + 42 + (Math.floor(children.length / 2) * 62);
+        } else if (type === 'miner') {
+            const rack = getSelectedRack();
+            if (!rack) {
+                updateSiteMapContextHint('Select a rack before adding a miner.');
+                return;
+            }
+            parentId = rack.id;
+            titlePrefix = 'M';
+            const children = getSiteMapChildren(rack.id).filter(child => child.type === 'miner');
+            desiredX = rack.x + 10 + ((children.length % 2) * 76);
+            desiredY = rack.y + 42 + (Math.floor(children.length / 2) * 34);
+        } else {
+            type = 'building';
+            titlePrefix = 'B';
+        }
+
+        const title = `${titlePrefix} ${siteMapCounters[type] || 1}`;
+        siteMapCounters[type] = (siteMapCounters[type] || 1) + 1;
+        const item = {
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            type,
+            title,
+            status: 'online',
+            parentId,
+            x: desiredX,
+            y: desiredY
+        };
+
+        if (type === 'building' || type === 'rack') item.expanded = true;
+
+        if (type === 'building') {
+            siteMapItems.forEach(entry => {
+                if (entry.type === 'building') entry.expanded = false;
+            });
+        }
+
+        if (type === 'rack' && parentId) {
+            siteMapItems.forEach(entry => {
+                if (entry.type === 'rack' && entry.parentId === parentId) entry.expanded = false;
+            });
+        }
+
+        const defaults = getSiteMapNodeSize(type);
+        item.width = defaults.width;
+        item.height = defaults.height;
+
+        const constrained = getConstrainedPosition(item, desiredX, desiredY);
+        item.x = constrained.x;
+        item.y = constrained.y;
+        siteMapItems.push(item);
+        selectedSiteMapItemId = item.id;
+
+        persistSiteMap();
+        renderSiteMap();
+    }
+
+    function clearSiteMap() {
+        if (!isSiteMapEditable()) {
+            updateSiteMapContextHint('Layout is locked. Enable Edit Mode to clear.');
+            return;
+        }
+        siteMapItems = [];
+        selectedSiteMapItemId = null;
+        persistSiteMap();
+        updateSiteMapEditControls();
+        renderSiteMap();
+    }
+
+    function deleteSiteMapItem(itemId) {
+        if (!isSiteMapEditable()) {
+            updateSiteMapContextHint('Layout is locked. Enable Edit Mode to delete.');
+            return;
+        }
+        const idsToDelete = new Set([itemId, ...collectDescendantIds(itemId)]);
+        siteMapItems = siteMapItems.filter(item => !idsToDelete.has(item.id));
+        if (idsToDelete.has(selectedSiteMapItemId)) selectedSiteMapItemId = null;
+        persistSiteMap();
+        updateSiteMapEditControls();
+        renderSiteMap();
+    }
+
+    function renameSiteMapItem(itemId) {
+        if (!isSiteMapEditable()) {
+            updateSiteMapContextHint('Layout is locked. Enable Edit Mode to rename.');
+            return;
+        }
+        const item = siteMapItems.find(entry => entry.id === itemId);
+        if (!item) return;
+        const next = prompt('Rename tile:', item.title);
+        if (next === null) return;
+        const title = next.trim();
+        if (!title) return;
+        item.title = title;
+        persistSiteMap();
+        renderSiteMap();
+    }
+
+    function beginSiteMapDrag(event, itemId) {
+        if (!isSiteMapEditable()) return;
+        if (event.target.closest('.site-node-delete')) return;
+        if (event.target.closest('.site-node-resize-handle')) return;
+        if (event.target.closest('.site-node-toggle')) return;
+
+        const item = siteMapItems.find(entry => entry.id === itemId);
+        if (!item) return;
+
+        selectedSiteMapItemId = item.id;
+
+        activeSiteMapDrag = {
+            itemId,
+            startX: event.clientX,
+            startY: event.clientY,
+            originX: item.x,
+            originY: item.y,
+            childOrigins: collectDescendantIds(item.id).map(id => {
+                const child = getSiteMapItem(id);
+                return child ? { id: child.id, x: child.x, y: child.y } : null;
+            }).filter(Boolean)
+        };
+        document.body.style.cursor = 'grabbing';
+        event.preventDefault();
+        renderSiteMap();
+    }
+
+    function beginSiteMapResize(event, itemId) {
+        if (!isSiteMapEditable()) return;
+
+        const item = getSiteMapItem(itemId);
+        if (!item || !['building', 'rack'].includes(item.type)) return;
+
+        const dimensions = getSiteMapNodeDimensions(item);
+        activeSiteMapResize = {
+            itemId,
+            startX: event.clientX,
+            startY: event.clientY,
+            startWidth: dimensions.width,
+            startHeight: dimensions.height
+        };
+        document.body.style.cursor = 'nwse-resize';
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function onSiteMapResizeMove(event) {
+        if (!activeSiteMapResize) return;
+
+        const item = getSiteMapItem(activeSiteMapResize.itemId);
+        if (!item) return;
+
+        const deltaX = event.clientX - activeSiteMapResize.startX;
+        const deltaY = event.clientY - activeSiteMapResize.startY;
+
+        let nextWidth = activeSiteMapResize.startWidth + deltaX;
+        let nextHeight = activeSiteMapResize.startHeight + deltaY;
+
+        if (item.type === 'building') {
+            nextWidth = clamp(nextWidth, 260, 560);
+            nextHeight = clamp(nextHeight, 170, 460);
+        } else {
+            nextWidth = clamp(nextWidth, 170, 320);
+            nextHeight = clamp(nextHeight, 96, 260);
+        }
+
+        item.width = nextWidth;
+        item.height = nextHeight;
+
+        const constrained = getConstrainedPosition(item, item.x, item.y);
+        item.x = constrained.x;
+        item.y = constrained.y;
+
+        const descendants = collectDescendantIds(item.id);
+        descendants.forEach(descId => {
+            const child = getSiteMapItem(descId);
+            if (!child) return;
+            const childConstrained = getConstrainedPosition(child, child.x, child.y);
+            child.x = childConstrained.x;
+            child.y = childConstrained.y;
+        });
+
+        renderSiteMap();
+    }
+
+    function stopSiteMapResize() {
+        if (!activeSiteMapResize) return;
+        activeSiteMapResize = null;
+        document.body.style.cursor = '';
+        persistSiteMap();
+    }
+
+    function onSiteMapDragMove(event) {
+        if (!activeSiteMapDrag) return;
+
+        const mapCanvas = document.getElementById('siteMapCanvas');
+        const nodeEl = document.querySelector(`[data-site-node-id="${activeSiteMapDrag.itemId}"]`);
+        const item = siteMapItems.find(entry => entry.id === activeSiteMapDrag.itemId);
+        if (!mapCanvas || !nodeEl || !item) return;
+
+        const deltaX = event.clientX - activeSiteMapDrag.startX;
+        const deltaY = event.clientY - activeSiteMapDrag.startY;
+
+        const constrained = getConstrainedPosition(item, activeSiteMapDrag.originX + deltaX, activeSiteMapDrag.originY + deltaY);
+        const shiftX = constrained.x - item.x;
+        const shiftY = constrained.y - item.y;
+
+        item.x = constrained.x;
+        item.y = constrained.y;
+        nodeEl.style.left = `${item.x}px`;
+        nodeEl.style.top = `${item.y}px`;
+
+        activeSiteMapDrag.childOrigins.forEach(childOrigin => {
+            const child = getSiteMapItem(childOrigin.id);
+            if (!child) return;
+            const childPosition = getConstrainedPosition(child, childOrigin.x + shiftX, childOrigin.y + shiftY);
+            child.x = childPosition.x;
+            child.y = childPosition.y;
+            const childEl = document.querySelector(`[data-site-node-id="${child.id}"]`);
+            if (childEl) {
+                childEl.style.left = `${child.x}px`;
+                childEl.style.top = `${child.y}px`;
+            }
+        });
+    }
+
+    function stopSiteMapDrag() {
+        if (!activeSiteMapDrag) return;
+        activeSiteMapDrag = null;
+        document.body.style.cursor = '';
+        persistSiteMap();
+        renderSiteMap();
+    }
+
+    function syncSiteMapFromMiners() {
+        if (!isSiteMapEditable()) {
+            updateSiteMapContextHint('Layout is locked. Enable Edit Mode to sync.');
+            return;
+        }
+
+        if (!minersData.length) {
+            updateSiteMapContextHint('No scanned miners');
+            return;
+        }
+
+        const buckets = {};
+        minersData.forEach(miner => {
+            const parts = String(miner.ip || '').split('.');
+            if (parts.length !== 4) return;
+            const subnet = `${parts[0]}.${parts[1]}.${parts[2]}.x`;
+            if (!buckets[subnet]) buckets[subnet] = [];
+            buckets[subnet].push(miner);
+        });
+
+        siteMapItems = siteMapItems.filter(item => item.source !== 'scan-sync');
+
+        const buildingId = `sync-building-${Date.now().toString(36)}`;
+        const autoBuilding = {
+            id: buildingId,
+            type: 'building',
+            title: 'B-Auto',
+            status: 'online',
+            x: 24,
+            y: 24,
+            width: 380,
+            height: 240,
+            expanded: true,
+            source: 'scan-sync'
+        };
+        siteMapItems.push(autoBuilding);
+
+        const subnets = Object.keys(buckets).sort();
+        subnets.forEach((subnet, index) => {
+            const rackId = `sync-rack-${Date.now().toString(36)}-${index}`;
+            const col = index % 3;
+            const row = Math.floor(index / 3);
+            const rack = {
+                id: rackId,
+                type: 'rack',
+                title: `R-${subnet}`,
+                status: 'online',
+                parentId: buildingId,
+                x: 36 + (col * 104),
+                y: 72 + (row * 62),
+                width: 210,
+                height: 120,
+                expanded: false,
+                source: 'scan-sync'
+            };
+            siteMapItems.push(rack);
+
+            buckets[subnet].slice(0, 4).forEach((miner, minerIndex) => {
+                siteMapItems.push({
+                    id: `sync-miner-${Date.now().toString(36)}-${index}-${minerIndex}`,
+                    type: 'miner',
+                    title: miner.hostname && miner.hostname !== 'N/A' ? miner.hostname : `M-${miner.ip}`,
+                    status: 'online',
+                    parentId: rackId,
+                    x: rack.x + 10 + ((minerIndex % 2) * 78),
+                    y: rack.y + 42 + (Math.floor(minerIndex / 2) * 30),
+                    width: 160,
+                    height: 74,
+                    source: 'scan-sync'
+                });
+            });
+        });
+
+        selectedSiteMapItemId = buildingId;
+
+        persistSiteMap();
+        updateSiteMapEditControls();
+        renderSiteMap();
+    }
+
+    function updateSiteMapContextHint(message) {
+        const hint = document.getElementById('siteMapContextHint');
+        if (!hint) return;
+
+        if (message) {
+            hint.innerText = message;
+            return;
+        }
+
+        const selected = getSiteMapItem(selectedSiteMapItemId);
+        if (!isSiteMapEditable()) {
+            hint.innerText = siteMapLayoutLocked
+                ? 'Locked'
+                : 'Edit off';
+            return;
+        }
+        if (!selected) {
+            hint.innerText = 'Pick a tile';
+            return;
+        }
+        if (selected.type === 'building') {
+            hint.innerText = `Building ${selected.title}`;
+            return;
+        }
+        if (selected.type === 'rack') {
+            hint.innerText = `Rack ${selected.title}`;
+            return;
+        }
+        hint.innerText = `Miner ${selected.title}`;
+    }
+
+    function renderSiteMap() {
+        const canvas = document.getElementById('siteMapCanvas');
+        if (!canvas) return;
+
+        if (!siteMapItems.length) {
+            canvas.innerHTML = '<div class="site-map-empty">No layout</div>';
+            updateSiteMapEditControls();
+            updateSiteMapContextHint();
+            return;
+        }
+
+        canvas.innerHTML = '';
+        const sortWeight = { building: 1, rack: 2, miner: 3 };
+        [...siteMapItems]
+            .filter(item => isSiteMapItemVisible(item))
+            .sort((a, b) => (sortWeight[a.type] || 99) - (sortWeight[b.type] || 99))
+            .forEach(item => {
+            const node = document.createElement('div');
+            node.className = `site-node site-node-${item.type}${item.status === 'offline' ? ' site-node-offline' : ''}`;
+            if (item.id === selectedSiteMapItemId) node.className += ' site-node-selected';
+            if (isSiteMapEditable()) node.className += ' site-node-editable';
+            node.setAttribute('data-site-node-id', item.id);
+            node.style.left = `${item.x}px`;
+            node.style.top = `${item.y}px`;
+
+            const dimensions = getSiteMapNodeDimensions(item);
+            node.style.width = `${dimensions.width}px`;
+            node.style.height = `${dimensions.height}px`;
+
+            const isExpandable = item.type === 'building' || item.type === 'rack';
+            const expandedIcon = item.expanded === false ? '&#9654;' : '&#9660;';
+            node.innerHTML = `
+                <div class="site-node-header">
+                    ${isExpandable ? `<button type="button" class="site-node-toggle" title="${item.expanded === false ? 'Expand' : 'Collapse'}" aria-label="${item.expanded === false ? 'Expand' : 'Collapse'}" onclick="toggleSiteMapExpand('${item.id}'); event.stopPropagation();">${expandedIcon}</button>` : '<span style="width:20px;display:inline-block;"></span>'}
+                    <span class="site-node-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span>
+                    ${isSiteMapEditable() ? `<button type="button" class="site-node-delete" title="Delete tile" aria-label="Delete tile" onclick="deleteSiteMapItem('${item.id}')">x</button>` : '<span style="width:20px;display:inline-block;"></span>'}
+                </div>
+                ${(isSiteMapEditable() && (item.type === 'building' || item.type === 'rack')) ? `<div class="site-node-resize-handle" onmousedown="beginSiteMapResize(event, '${item.id}')" title="Resize"></div>` : ''}
+            `;
+            if (isSiteMapEditable()) {
+                node.onmousedown = (event) => beginSiteMapDrag(event, item.id);
+                node.ondblclick = () => renameSiteMapItem(item.id);
+            }
+            node.onclick = () => {
+                selectedSiteMapItemId = item.id;
+                updateSiteMapContextHint();
+                renderSiteMap();
+            };
+            canvas.appendChild(node);
+        });
+
+        updateSiteMapEditControls();
+        updateSiteMapContextHint();
+    }
+
+    // Parse input supporting: single IP, dash ranges, comma-separated ranges, CIDR
+    function parseIPRangeInput(input) {
+        if (!input || !input.trim()) return { error: 'Empty range' };
+        const parts = input.split(',').map(p => p.trim()).filter(Boolean);
+        const ranges = [];
+
+        for (const part of parts) {
+            // CIDR
+            if (part.includes('/')) {
+                const [ip, prefixStr] = part.split('/');
+                const prefix = parseInt(prefixStr, 10);
+                if (!ip || isNaN(prefix) || prefix < 0 || prefix > 32) return { error: `Invalid CIDR: ${part}` };
+                const base = ipToNum(ip);
+                const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+                const network = base & mask;
+                const broadcast = network | (~mask >>> 0);
+                ranges.push({ start: network >>> 0, end: broadcast >>> 0 });
+                continue;
+            }
+
+            // Dash range
+            if (part.includes('-')) {
+                const [a, b] = part.split('-').map(s => s.trim());
+                if (!a || !b) return { error: `Invalid range: ${part}` };
+                const start = ipToNum(a);
+                const end = ipToNum(b);
+                if (isNaN(start) || isNaN(end)) return { error: `Invalid range entry: ${part}` };
+                if (start > end) return { error: `Start > end in range: ${part}` };
+                ranges.push({ start, end });
+                continue;
+            }
+
+            // Single IP
+            const v = ipToNum(part);
+            if (isNaN(v)) return { error: `Invalid entry: ${part}` };
+            ranges.push({ start: v, end: v });
+        }
+
+        return { ranges };
+    }
+
+    function totalIPsInRanges(ranges) {
+        return ranges.reduce((sum, r) => sum + (r.end - r.start + 1), 0);
+    }
+
+    function updateRangeInfo() {
+        const input = document.getElementById('rangeInput').value;
+        const scanBtn = document.getElementById('scanBtn');
+        const saveQuickRangeBtn = document.getElementById('saveQuickRangeBtn');
+
+        if (!input || !input.trim()) {
+            scanBtn.disabled = true;
+            if (saveQuickRangeBtn) saveQuickRangeBtn.disabled = true;
+            return;
+        }
+
+        const parsed = parseIPRangeInput(input);
+        if (parsed.error) {
+            scanBtn.disabled = true;
+            if (saveQuickRangeBtn) saveQuickRangeBtn.disabled = true;
+            return;
+        }
+
+        if (saveQuickRangeBtn) saveQuickRangeBtn.disabled = false;
+
+        const count = totalIPsInRanges(parsed.ranges);
+        if (count > 65536) {
+            scanBtn.disabled = true;
+            return;
+        }
+
+        scanBtn.disabled = false;
+    }
+
+    // Sorting now happens from header arrow controls only
+    function setSortDirection(column, ascending) {
+        if (isDraggingHeader) return;
+
+        sortCol = column;
+        sortAsc = ascending;
+        renderHeaders();
+        renderTable();
+    }
+
+    // Loads local mock miner rows for frontend-only testing
+    function loadTestData() {
+        const status = document.getElementById('status');
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        scanInProgress = false;
+        const btn = document.getElementById('scanBtn');
+        const stopBtn = document.getElementById('stopScanBtn');
+        btn.disabled = false;
+        btn.innerText = 'Scan Network';
+        if (stopBtn) stopBtn.disabled = true;
+
+        minersData = [
+            { ip: '10.10.1.14', status: 'online', hashrate: '134.72', temp: '68',  hostname: 'antminer-01', mac: 'A4:56:02:3C:11:0A', os: 'AntMiner',  minerType: 'Antminer S19 Pro',   cbType: 'BM1362', hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.1.15', status: 'online', hashrate: '110.05', temp: '71',  hostname: 'antminer-02', mac: 'A4:56:02:3C:11:0B', os: 'AntMiner',  minerType: 'Antminer S19',       cbType: 'BM1362', hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.2.8',  status: 'online', hashrate: '198.44', temp: '65',  hostname: 'whatsminer-01', mac: 'B0:19:C6:7A:22:FF', os: 'WhatsMiner', minerType: 'WhatsMiner M50S', cbType: 'SJ346',  hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.2.9',  status: 'online', hashrate: '201.10', temp: '63',  hostname: 'whatsminer-02', mac: 'B0:19:C6:7A:22:FE', os: 'WhatsMiner', minerType: 'WhatsMiner M50S', cbType: 'SJ346',  hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.3.22', status: 'online', hashrate: '84.00',  temp: '74',  hostname: 'antminer-03', mac: 'A4:56:02:3C:22:1C', os: 'AntMiner',  minerType: 'Antminer S17 Pro',   cbType: 'BM1397', hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.3.23', status: 'online', hashrate: '56.33',  temp: '79',  hostname: 'antminer-04', mac: 'A4:56:02:3C:22:1D', os: 'AntMiner',  minerType: 'Antminer T17+',      cbType: 'BM1397', hashboards: '2/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.4.5',  status: 'online', hashrate: '335.00', temp: '60',  hostname: 'antminer-05', mac: 'A4:56:02:4D:33:AA', os: 'AntMiner',  minerType: 'Antminer S21 Pro',   cbType: 'BM1368', hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.4.6',  status: 'online', hashrate: '329.88', temp: '61',  hostname: 'antminer-06', mac: 'A4:56:02:4D:33:AB', os: 'AntMiner',  minerType: 'Antminer S21 Pro',   cbType: 'BM1368', hashboards: '4/4', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.5.11', status: 'online', hashrate: '145.00', temp: '70',  hostname: 'avalon-01',   mac: 'C4:7F:51:9B:44:BC', os: 'cgminer',   minerType: 'Avalon 1246',        cbType: 'A3206',  hashboards: '3/3', pools: 'stratum+tcp://pool.example.com:3333' },
+            { ip: '10.10.5.12', status: 'online', hashrate: '0.00',   temp: 'N/A', hostname: 'avalon-02',   mac: 'C4:7F:51:9B:44:BD', os: 'cgminer',   minerType: 'Avalon 1246',        cbType: 'A3206',  hashboards: '0/3', pools: 'N/A' },
+        ];
+
+        minersData = minersData.map((miner) => ({
+            ...miner,
+            ipMode: miner.ip.endsWith('.12') ? 'DHCP' : 'Static',
+            osVersion: miner.os === 'cgminer' ? '4.11.1' : 'N/A',
+            psuInfo: 'N/A',
+            fans: '5200/5300/5250/5280',
+            fanStatus: '4/4',
+            voltage: '12.40',
+            frequencyMHz: '540',
+            activeHashboards: String(parseInt(String(miner.hashboards).split('/')[0] || '0', 10) || 0)
+        }));
+
+        status.innerText = `Done. Total: ${minersData.length}`;
+        status.style.color = 'var(--success-color)';
+        renderTable();
+    }
+
+    // Stops the active SSE scan stream.
+    function stopScan() {
+        if (!scanInProgress) return;
+
+        scanInProgress = false;
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+
+        const scanBtn = document.getElementById('scanBtn');
+        const stopBtn = document.getElementById('stopScanBtn');
+        const status = document.getElementById('status');
+
+        scanBtn.innerText = 'Scan Network';
+        updateRangeInfo();
+        if (stopBtn) stopBtn.disabled = true;
+        status.innerText = `Scan stopped. Found ${minersData.length}.`;
+        status.style.color = 'var(--status-color)';
+    }
+
+    // Starts backend scan stream and updates rows as events arrive
+    function startScan() {
+        const ipRange = document.getElementById('rangeInput').value;
+        // Final validation before starting
+        const parsed = parseIPRangeInput(ipRange);
+        if (parsed.error) {
+            const statusEl = document.getElementById('status');
+            statusEl.innerText = `Invalid range: ${parsed.error}`;
+            statusEl.style.color = 'var(--error-color)';
+            return;
+        }
+        const btn = document.getElementById('scanBtn');
+        const stopBtn = document.getElementById('stopScanBtn');
+        const status = document.getElementById('status');
+        
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+
+        scanInProgress = true;
+        btn.disabled = true;
+        btn.innerText = "Scanning...";
+        if (stopBtn) stopBtn.disabled = false;
+        minersData = []; 
+        renderTable();   
+        
+        status.innerText = `Found 0.`;
+        status.style.color = "var(--status-color)"; 
+
+        eventSource = new EventSource(`/api/scan?range=${encodeURIComponent(ipRange)}&concurrency=${scanConcurrency}`);
+
+        eventSource.onmessage = function(event) {
+            if (!scanInProgress) return;
+            const miner = JSON.parse(event.data);
+            
+            const summaryData = miner.data && miner.data.SUMMARY && miner.data.SUMMARY[0] ? miner.data.SUMMARY[0] : {};
+            let hashrateTHs = miner.hashrate || "N/A";
+            if (hashrateTHs === "N/A") {
+                if (summaryData['GHS 5s']) hashrateTHs = (parseFloat(summaryData['GHS 5s']) / 1000).toFixed(2);
+                else if (summaryData['GHS av']) hashrateTHs = (parseFloat(summaryData['GHS av']) / 1000).toFixed(2);
+            }
+
+            minersData.push({
+                ip: miner.ip,
+                status: 'online',
+                hashrate: hashrateTHs,
+                temp: miner.temp || "N/A",
+                fans: miner.fans || "N/A",
+                fanStatus: miner.fanStatus || "N/A",
+                voltage: miner.voltage || "N/A",
+                frequencyMHz: miner.frequencyMHz || "N/A",
+                hostname: miner.hostname || "N/A",
+                mac: miner.mac || "N/A",
+                ipMode: miner.ipMode || "N/A",
+                os: miner.os || miner.osType || "N/A",
+                osVersion: miner.osVersion || "N/A",
+                minerType: miner.minerType || "N/A",
+                cbType: miner.cbType || miner.controlBoard || "N/A",
+                psuInfo: miner.psuInfo || "N/A",
+                activeHashboards: miner.activeHashboards || "N/A",
+                hashboards: miner.hashboards || "N/A",
+                pools: miner.pools || "N/A"
+            });
+
+            status.innerText = `Found ${minersData.length}.`;
+            renderTable();
+        };
+
+        eventSource.addEventListener('done', function() {
+            if (!scanInProgress) return;
+            scanInProgress = false;
+            eventSource.close();
+            eventSource = null;
+            btn.innerText = "Scan Network";
+            updateRangeInfo();
+            if (stopBtn) stopBtn.disabled = true;
+            status.innerText = `Done. Total: ${minersData.length}`;
+            status.style.color = "var(--success-color)";
+        });
+
+        eventSource.onerror = function() {
+            if (!scanInProgress) return;
+            scanInProgress = false;
+            eventSource.close();
+            eventSource = null;
+            btn.innerText = "Scan Network";
+            updateRangeInfo();
+            if (stopBtn) stopBtn.disabled = true;
+            status.innerText = "Connection lost.";
+            status.style.color = "var(--error-color)";
+        };
+    }
+</script>
+
+</body>
+</html>

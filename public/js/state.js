@@ -9,6 +9,7 @@ let sortAsc = true;
 let columnDragEnabled = false;
 let editModeEnabled = false;
 let sidebarResizing = false;
+let devMode = false;
 let sidebarResizeStart = 0;
 const defaultSidebarWidth = 46;
 const minSidebarWidth = 46;

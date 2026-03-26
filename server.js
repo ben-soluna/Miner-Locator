@@ -8,7 +8,7 @@ const http = require('http');
 const { execFile } = require('child_process');
 
 const app = express();
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3067', 10) || 3067;
 const MAX_IPS_PER_SCAN = 65536;
 const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.SCAN_CONCURRENCY || '48', 10) || 48);
 const HTTP_FALLBACK_CONCURRENCY = Math.max(1, parseInt(process.env.HTTP_FALLBACK_CONCURRENCY || '6', 10) || 6);

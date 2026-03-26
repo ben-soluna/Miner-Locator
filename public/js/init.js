@@ -151,6 +151,12 @@ function setupDelegatedEventHandlers() {
         selectSavedRange(checkbox.dataset.rangeId, checkbox.checked);
     });
 
+    // Dev mode toggle
+    const devModeToggle = getEl('devModeToggle');
+    if (devModeToggle) {
+        devModeToggle.addEventListener('change', handleDevModeToggle);
+    }
+
     document.addEventListener('mousedown', (event) => {
         const handle = event.target.closest('[data-action="begin-site-map-resize"]');
         if (!handle) return;
@@ -203,5 +209,6 @@ window.onload = () => {
     initScanConcurrencySetting();
     initSidebarResize();
     initSidebarWidthSetting();
+    initDevModeSetting();
     // Site Map intentionally disabled for now.
 };

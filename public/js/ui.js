@@ -241,6 +241,24 @@ function setQuickRangeInputValue(value) {
     suppressQuickRangeInputHandler = false;
 }
 
+// Dev Mode toggle
+function initDevModeSetting() {
+    const toggle = getEl('devModeToggle');
+    if (!toggle) return;
+    
+    const stored = localStorage.getItem('devMode');
+    devMode = stored === 'true';
+    toggle.checked = devMode;
+}
+
+function handleDevModeToggle() {
+    const toggle = getEl('devModeToggle');
+    if (!toggle) return;
+    
+    devMode = toggle.checked;
+    localStorage.setItem('devMode', String(devMode));
+}
+
 // Switches between sidebar views and updates active menu state
 function selectView(viewId, clickedButton) {
     if (viewId === 'siteMapView') return;
