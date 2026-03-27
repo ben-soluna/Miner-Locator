@@ -2,12 +2,47 @@
   "name": "miner-locator",
   "version": "0.2.2",
   "private": true,
-  "description": "Minimal runtime package for Miner-Finder server",
+  "description": "Miner-Finder network scanner with Express backend and Electron desktop shell",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:electron": "electron electron/main.js",
+    "build:electron:win": "electron-builder --win portable --x64",
+    "pack:electron": "electron-builder --dir"
   },
   "dependencies": {
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "electron": "^37.2.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.soluna.minerfinder",
+    "productName": "Miner-Finder",
+    "asar": false,
+    "directories": {
+      "output": "dist/electron"
+    },
+    "files": [
+      "electron/**/*",
+      "server.js",
+      "public/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }

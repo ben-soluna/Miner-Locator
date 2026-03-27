@@ -34,6 +34,8 @@ Open: `http://localhost:3067`
 ## Scripts
 
 - `npm start` — Starts `server.js` on port 3067.
+- `npm run start:electron` — Starts the Electron desktop shell and launches the local server in-process.
+- `npm run build:electron:win` — Builds Windows Electron artifacts in `dist/electron/`.
 - `npm run test:api` — API validation checks.
 - `npm run test:ui-smoke` — UI clickthrough test with Selenium.
 - `npm run build:exe` — Build OS-native executable to `dist/`.
@@ -54,6 +56,13 @@ Open: `http://localhost:3067`
 - Extract the zip and run `start.bat` (or `run-from-usb.bat`).
 - No Node.js install is required on the target machine (runtime is included as official signed `node.exe`).
 - Admin rights are usually not required, but local policy controls (AppLocker/Defender/firewall) can still restrict execution or network scanning.
+
+## Electron Windows Usage
+
+- Build desktop artifacts with: `npm run build:electron:win`
+- Output folder: `dist/electron/`
+- Expected artifacts: a portable `.exe` and the unpacked app folder.
+- The Electron app starts the bundled Express server automatically and opens the UI in a desktop window.
 
 ## USB Windows Usage
 
