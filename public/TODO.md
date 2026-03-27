@@ -81,6 +81,10 @@
 - [x] Add optional parallel ICMP pre-pass modes (`off`/`prioritize`/`strict`) for enterprise scan acceleration
 - [x] Set default ICMP pre-pass mode to `prioritize` for faster first results
 - [x] Disable enrichment pass by default and fold key fields into single-pass discovery
+- [x] Add Electron packaging targets for Linux AppImage and Windows portable `.exe` (USB-direct run)
+- [x] Fix Linux Electron startup path to avoid blank window by bootstrapping server in-process and showing startup error UI
+- [x] Set Home UI to always default dark mode (no light-mode root palette)
+- [x] Reduce Linux Electron startup popup errors by reusing existing local server when port 3067 is already active
 - [x] Normalize Edit Columns spacing with equal top and bottom padding
 - [x] Move sorting to outlined up/down arrow controls in each column header
 - [x] Stack column sort arrows vertically and increase their size
@@ -105,6 +109,14 @@
 - [x] Add distinct color styling for Deselect All vs Select All visibility states
 - [x] Add USB-first Windows launcher and docs for no-install portable execution
 - [X] Add Select All / Deselect All controls on the IP Ranges page
+- [x] Add Flagged Miners review workflow UI (Deep Scan, Load Logs, and per-miner review panel) as frontend preview scaffolding
+- [x] Animate inline Flagged Miner review expand/collapse for smoother open/close transitions
+- [x] Remove explicit View/Collapse action and make flagged row click toggle inline review (IP link remains direct navigation)
+- [x] Move Deep Scan and Load Logs controls into the expanded inline review area for each flagged miner
+- [x] Keep Deep Scan/Load Logs sticky at top of expanded inline review while scrolling long log content
+- [x] Add dev-mode-only `Load Test Logs` control beside `Load Logs` in expanded flagged review actions
+- [x] Revert frontend preview logs from paged 100-line loading back to full payload loads on button press
+- [ ] Revisit contrast tuning for expanded flagged review view (current styling is functional but needs a cleaner readability pass)
 - [ ] Create a site map view
 
 ## Backend

@@ -41,6 +41,10 @@ Open: `http://localhost:3067`
 - `npm run build:exe` — Build OS-native executable to `dist/`.
 - `npm run bundle:portable:win` — Create Windows portable bundle with launcher.
 - `npm run bundle:node:win` — Create signed Node.js Windows package (SmartScreen-friendly).
+- `npm run electron:dev` — Launch Electron shell with embedded server.
+- `npm run build:electron:linux` — Build Linux AppImage in `dist/electron/`.
+- `npm run build:electron:win` — Build Windows portable `.exe` in `dist/electron/`.
+- `npm run build:electron:all` — Build Linux + Windows portable targets.
 - `npm run test:project` — Full verification: syntax + API + UI + build.
 
 ## Windows Validation
@@ -70,6 +74,15 @@ Open: `http://localhost:3067`
 - Copy `portable-win/` to USB.
 - On target Windows machine, run `portable-win/run-from-usb.bat`.
 - If USB execution is blocked by endpoint policy, copy the folder locally and run `portable-win/start.bat`.
+
+## Electron Packaging
+
+- Linux output: `dist/electron/Miner-Finder-<version>-linux-x64.AppImage`
+- Windows output: `dist/electron/Miner-Finder-<version>-portable-win.exe`
+
+Windows portable behavior:
+- Single executable (`portable` target), no installer.
+- Runs directly from USB without manual extraction by the end user.
 
 ## Project Structure
 

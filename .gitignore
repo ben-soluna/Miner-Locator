@@ -8,3 +8,4 @@ node_modules/
 portable-win/
 .vscode/
 node-bundle-win/
+dist/

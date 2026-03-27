@@ -90,6 +90,30 @@ function setupDelegatedEventHandlers() {
                 event.stopPropagation();
                 break;
             }
+            case 'deep-scan-flagged': {
+                const ip = actionEl.dataset.ip || '';
+                startFlaggedMinerDeepScan(ip);
+                event.stopPropagation();
+                break;
+            }
+            case 'load-flagged-logs': {
+                const ip = actionEl.dataset.ip || '';
+                fetchFlaggedMinerLogs(ip);
+                event.stopPropagation();
+                break;
+            }
+            case 'load-flagged-test-logs': {
+                const ip = actionEl.dataset.ip || '';
+                fetchFlaggedMinerTestLogs(ip);
+                event.stopPropagation();
+                break;
+            }
+            case 'view-flagged-review': {
+                const ip = actionEl.dataset.ip || '';
+                selectFlaggedReviewMiner(ip);
+                event.stopPropagation();
+                break;
+            }
             case 'edit-saved-range': {
                 const rangeId = actionEl.dataset.rangeId;
                 if (rangeId) editSavedRange(rangeId);
@@ -191,12 +215,31 @@ function setupDelegatedEventHandlers() {
         }
     });
 
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+
+        // IP clicks should always navigate to miner web UI.
+        if (target.closest('a.ip-link')) return;
+
+        const row = target.closest('tr.miner-data-row[data-view-id="flaggedMinersView"]');
+        if (!row) return;
+
+        // Row-only behavior: action controls keep their own handlers.
+        if (target.closest('[data-action]')) return;
+
+        const ip = String(row.dataset.ip || '').trim();
+        if (!ip) return;
+        selectFlaggedReviewMiner(ip);
+    });
+
     document.body.dataset.delegatedEventsBound = 'true';
 }
 
 window.onload = () => {
     setupDelegatedEventHandlers();
     initFlaggedMiners();
+    initFlaggedMinerReviewState();
     initCachedMinerData();
     updateMinerCacheStatus();
     renderHeaders();
@@ -213,5 +256,6 @@ window.onload = () => {
     initSidebarResize();
     initSidebarWidthSetting();
     initDevModeSetting();
+    renderFlaggedReviewPanel();
     // Site Map intentionally disabled for now.
 };

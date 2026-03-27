@@ -281,14 +281,24 @@ function renderTableBody(bodyId, miners, viewId) {
     if (!tbody) return;
 
     const visibleCols = getColumnsForView(viewId).filter(c => c.visible);
+    const stateLabelByKey = {
+        idle: 'Not Started',
+        running: 'Running',
+        complete: 'Complete'
+    };
+
     const rowsHtml = miners.map((miner) => {
         let rowHtml = '';
+        let detailRowHtml = '';
         const flagged = isMinerFlagged(miner.ip);
         const pendingRemoval = viewId === 'flaggedMinersView' && isFlaggedMinerPendingRemoval(miner.ip);
         const homeLocked = viewId === 'dashboardView' && flagged;
         const hasDebugPayload = Boolean(miner.hasDebugPayload || miner.data);
         const safeIp = escapeHtml(miner.ip || 'N/A');
         const safeIpHref = escapeHtml(`http://${String(miner.ip || '').trim()}`);
+        const reviewEntry = viewId === 'flaggedMinersView' ? getFlaggedMinerReviewEntry(miner.ip) : null;
+        const reviewState = reviewEntry?.scanState || 'idle';
+        const isExpandedReview = viewId === 'flaggedMinersView' && selectedFlaggedReviewIp === String(miner.ip || '').trim();
         const flagButtonLabel = flagged
             ? (viewId === 'flaggedMinersView' ? (pendingRemoval ? 'Remove' : 'Reviewed') : 'Flagged')
             : 'Flag';
@@ -342,7 +352,73 @@ function renderTableBody(bodyId, miners, viewId) {
             }
         });
 
-        return `<tr>${rowHtml}</tr>`;
+        if (viewId === 'flaggedMinersView') {
+            const reviewNotes = escapeHtml(reviewEntry?.notes || 'No notes yet.');
+            const reviewLogs = reviewEntry?.logs || 'No logs loaded yet. Click "Load Logs" to fetch logs for this miner.';
+            const reviewLogHeader = [
+                `Review Target: ${String(miner.ip || 'N/A')}`,
+                `Model: ${String(miner.minerType || 'N/A')}`,
+                `Hashrate: ${String(miner.hashrate || 'N/A')} TH/s`,
+                `Fan Status: ${String(miner.fanStatus || 'N/A')}`,
+                ''
+            ].join('\n');
+            const reviewOutput = escapeHtml(`${reviewLogHeader}${reviewLogs}`);
+            const scanStateLabel = stateLabelByKey[reviewState] || 'Not Started';
+
+            detailRowHtml = `
+                <tr class="flagged-inline-review-row${isExpandedReview ? ' expanded' : ''}" data-ip="${escapeHtml(String(miner.ip || ''))}"${isExpandedReview ? '' : ' hidden'}>
+                    <td colspan="${visibleCols.length}" class="flagged-inline-review-cell">
+                        <div class="flagged-inline-review-card">
+                            <div class="flagged-inline-review-header">
+                                <span class="flagged-inline-review-state">${escapeHtml(scanStateLabel)}</span>
+                            </div>
+                            <div class="flagged-inline-review-scroll">
+                                <div class="flagged-inline-review-actions">
+                                    <button
+                                        type="button"
+                                        class="deep-scan-btn${reviewState === 'complete' ? ' complete' : ''}"
+                                        data-action="deep-scan-flagged"
+                                        data-ip="${escapeHtml(String(miner.ip || ''))}"
+                                        aria-label="Run deep scan for miner ${safeIp}"
+                                    >${reviewState === 'complete' ? 'Rescan' : 'Deep Scan'}</button>
+                                    <button
+                                        type="button"
+                                        class="load-logs-btn"
+                                        data-action="load-flagged-logs"
+                                        data-ip="${escapeHtml(String(miner.ip || ''))}"
+                                        aria-label="Load logs for miner ${safeIp}"
+                                    >Load Logs</button>
+                                    ${devMode ? `<button
+                                        type="button"
+                                        class="load-test-logs-btn"
+                                        data-action="load-flagged-test-logs"
+                                        data-ip="${escapeHtml(String(miner.ip || ''))}"
+                                        aria-label="Load test logs for miner ${safeIp}"
+                                    >Load Test Logs</button>` : ''}
+                                </div>
+                                <div class="flagged-inline-review-meta">
+                                    <div class="meta-item">
+                                        <span class="meta-label">Last Deep Scan</span>
+                                        <span class="meta-value">${escapeHtml(formatReviewTimestamp(reviewEntry?.lastDeepScanAt))}</span>
+                                    </div>
+                                    <div class="meta-item">
+                                        <span class="meta-label">Last Logs Fetch</span>
+                                        <span class="meta-value">${escapeHtml(formatReviewTimestamp(reviewEntry?.lastLogsFetchAt))}</span>
+                                    </div>
+                                    <div class="meta-item meta-item-wide">
+                                        <span class="meta-label">Review Notes</span>
+                                        <span class="meta-value">${reviewNotes}</span>
+                                    </div>
+                                </div>
+                                <pre class="flagged-inline-review-log">${reviewOutput}</pre>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        return `<tr class="miner-data-row${isExpandedReview ? ' expanded-review' : ''}" data-ip="${escapeHtml(String(miner.ip || ''))}" data-view-id="${viewId}">${rowHtml}</tr>${detailRowHtml}`;
     }).join('');
 
     tbody.innerHTML = rowsHtml;

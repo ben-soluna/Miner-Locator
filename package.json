@@ -2,36 +2,47 @@
   "name": "miner-locator",
   "version": "0.2.2",
   "private": true,
-  "description": "Miner-Finder network scanner with Express backend and Electron desktop shell",
-  "main": "server.js",
+  "description": "Miner-Finder with Electron packaging for Linux and Windows portable builds",
+  "main": "electron-main.js",
   "scripts": {
     "start": "node server.js",
-    "start:electron": "electron electron/main.js",
-    "build:electron:win": "electron-builder --win portable --x64",
-    "pack:electron": "electron-builder --dir"
+    "electron:dev": "electron .",
+    "build:electron": "electron-builder",
+    "build:electron:linux": "electron-builder --linux AppImage",
+    "build:electron:win": "electron-builder --win portable",
+    "build:electron:all": "electron-builder --linux AppImage --win portable"
   },
   "dependencies": {
     "express": "^4.21.2"
   },
   "devDependencies": {
-    "electron": "^37.2.1",
-    "electron-builder": "^26.0.12"
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.soluna.minerfinder",
+    "appId": "com.bensoluna.minerlocator",
     "productName": "Miner-Finder",
-    "asar": false,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist/electron"
     },
+    "asar": true,
     "files": [
-      "electron/**/*",
+      "electron-main.js",
       "server.js",
       "public/**/*",
       "package.json"
     ],
-    "extraMetadata": {
-      "main": "electron/main.js"
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Network"
     },
     "win": {
       "signAndEditExecutable": false,
@@ -43,6 +54,9 @@
           ]
         }
       ]
+    },
+    "portable": {
+      "artifactName": "Miner-Finder-${version}-portable-win.exe"
     }
   }
 }
