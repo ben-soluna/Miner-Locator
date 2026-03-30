@@ -1,9 +1,9 @@
-<!-- Version: 0.2.2 -->
+<!-- Version: 0.3.0 -->
 # Miner-Finder
 
 **GitHub:** https://github.com/ben-soluna/Miner-Locator
 
-Last updated: 2026-03-24 (v0.2.2)
+Last updated: 2026-03-30 (v0.3.0)
 
 Lightweight miner network scanner with a browser UI and real-time scan results over Server-Sent Events (SSE).
 

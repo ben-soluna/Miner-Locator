@@ -1,4 +1,4 @@
-// Version: 0.2.2
+// Version: 0.3.0
 const express = require('express');
 const net = require('net');
 const path = require('path');
@@ -1101,20 +1101,38 @@ function deriveMacFromConfig(configRecords) {
 }
 
 function derivePoolString(poolsPayload) {
-    const pools = sectionArray(poolsPayload, ['pools']);
-    const urls = pools
-        .map(pool => pickField(pool, ['url', 'stratum active', 'stratumurl']))
-        .filter(Boolean)
+    const normalizePoolEndpoint = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+
+        // Normalize to host:port for UI consistency across firmware variants.
+        let text = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+        text = text.replace(/^.*@/, '');
+        text = text.split('/')[0];
+        text = text.trim();
+        if (!text) return '';
+
+        if (/^[a-z0-9.-]+:\d+$/i.test(text)) return text;
+        return '';
+    };
+
+    const records = collectObjectRecords(poolsPayload, []);
+    const endpoints = records
+        .map(record => pickField(record, ['url', 'stratumurl', 'stratum_url']))
+        .filter((value) => value !== undefined && value !== null)
         .map(value => String(value).trim())
+        .map(normalizePoolEndpoint)
         .filter(Boolean);
 
-    if (!urls.length) return 'N/A';
-    return Array.from(new Set(urls)).join(', ');
+    if (!endpoints.length) return 'N/A';
+    return Array.from(new Set(endpoints)).join(', ');
 }
 
 function deriveHashrateTHs(summaryRecords) {
     const ghs5s = pickFieldFromRecords(summaryRecords, ['ghs5s', 'ghs 5s']);
     const ghsAvg = pickFieldFromRecords(summaryRecords, ['ghsav', 'ghs av']);
+    const mhs5s = pickFieldFromRecords(summaryRecords, ['mhs30s', 'mhs 30s', 'mhs1m', 'mhs 1m']);
+    const mhsAvg = pickFieldFromRecords(summaryRecords, ['mhsav', 'mhs av']);
 
     if (ghs5s !== undefined) {
         const num = parseFloat(String(ghs5s));
@@ -1124,6 +1142,17 @@ function deriveHashrateTHs(summaryRecords) {
     if (ghsAvg !== undefined) {
         const num = parseFloat(String(ghsAvg));
         if (Number.isFinite(num)) return (num / 1000).toFixed(2);
+    }
+
+    // Avalon-style responses often report MHS fields only.
+    if (mhs5s !== undefined) {
+        const num = parseFloat(String(mhs5s));
+        if (Number.isFinite(num)) return (num / 1000000).toFixed(2);
+    }
+
+    if (mhsAvg !== undefined) {
+        const num = parseFloat(String(mhsAvg));
+        if (Number.isFinite(num)) return (num / 1000000).toFixed(2);
     }
 
     return 'N/A';
@@ -1177,7 +1206,7 @@ function build4028ColumnProvenance(payloads, profile) {
         ? (hasConfig ? 'config' : 'arp')
         : 'missing';
     const cbTypeSource = !isMissing(profile.cbType)
-        ? (hasConfig ? 'config' : (hasStats ? 'stats' : 'unknown'))
+        ? (hasConfig ? 'config' : (hasStats ? 'stats' : (hasVersion ? 'version' : 'unknown')))
         : 'missing';
     const psuSource = !isMissing(profile.psuInfo)
         ? (hasConfig ? 'config' : (hasStats ? 'stats' : (hasDevdetails ? 'devdetails' : 'unknown')))
@@ -1194,8 +1223,8 @@ function build4028ColumnProvenance(payloads, profile) {
         ipMode: makeColumnSource(!isMissing(profile.ipMode) && hasConfig ? 'config' : 'missing', ['config']),
         os: makeColumnSource(!isMissing(profile.os) && hasVersion ? 'version' : 'missing', ['version']),
         osVersion: makeColumnSource(!isMissing(profile.osVersion) && hasVersion ? 'version' : 'missing', ['version']),
-        minerType: makeColumnSource(!isMissing(profile.minerType) && hasStats ? 'stats' : 'missing', ['stats']),
-        cbType: makeColumnSource(cbTypeSource, ['config', 'stats']),
+        minerType: makeColumnSource(!isMissing(profile.minerType) ? (hasStats ? 'stats' : (hasVersion ? 'version' : 'unknown')) : 'missing', ['stats', 'version']),
+        cbType: makeColumnSource(cbTypeSource, ['config', 'stats', 'version']),
         psuInfo: makeColumnSource(psuSource, ['config', 'stats', 'devdetails']),
         temp: makeColumnSource(!isMissing(profile.temp) && hasStats ? 'stats' : 'missing', ['stats']),
         fans: makeColumnSource(!isMissing(profile.fans) && hasStats ? 'stats' : 'missing', ['stats']),
@@ -1463,8 +1492,29 @@ function normalizeFirmware(allRecords) {
                 return 'Braiins OS';
             if (v.includes('luxos') || v.includes('luxminer'))
                 return 'LuxOS';
+
+            const k = normKey(key);
+            if (k === 'prod' || k === 'model' || k === 'hwtype' || k.startsWith('avalon')) {
+                if (v.includes('avalon')) return 'Avalon Stock';
+            }
         }
     }
+
+    // Avalon VERSION payloads commonly expose PROD/MODEL/HWTYPE, even when
+    // software key is generic CGMiner.
+    for (const rec of allRecords) {
+        if (!rec || typeof rec !== 'object') continue;
+        const prod = String(pickField(rec, ['prod', 'model', 'hwtype']) || '').toLowerCase();
+        if (prod.includes('avalon')) return 'Avalon Stock';
+
+        // Avalon CGMiner stats signatures.
+        const hasAvalonKeys = pickField(rec, ['mm id0', 'mmid0', 'mm count', 'mmcount']) !== undefined;
+        if (hasAvalonKeys) return 'Avalon Stock';
+
+        const idValue = String(pickField(rec, ['id']) || '').toLowerCase();
+        if (idValue.startsWith('ava')) return 'Avalon Stock';
+    }
+
     // BMMiner/CGMiner implies Bitmain stock
     for (const rec of allRecords) {
         if (!rec || typeof rec !== 'object') continue;
@@ -1513,7 +1563,57 @@ function normalizeControlBoard(allRecords) {
             }
         }
     }
+
+    // Avalon firmware commonly reports hardware type as HWTYPE/MM* in VERSION.
+    const hwTypeRaw = pickFieldFromRecords(allRecords, ['hwtype', 'boardtype']);
+    if (hwTypeRaw) {
+        const text = String(hwTypeRaw).trim();
+        if (text) return text;
+    }
+
     return 'N/A';
+}
+
+function getAvalonStatsBlob(statsRecords) {
+    const raw = pickFieldFromRecords(statsRecords, ['mm id0', 'mmid0']);
+    const text = String(raw || '').trim();
+    return text || '';
+}
+
+function parseAvalonBracketNumber(blob, label) {
+    const text = String(blob || '');
+    if (!text) return null;
+    const re = new RegExp(`${label}\\[\\s*(-?\\d+(?:\\.\\d+)?)`, 'i');
+    const match = text.match(re);
+    if (!match) return null;
+    const value = parseFloat(match[1]);
+    if (!Number.isFinite(value)) return null;
+    return value;
+}
+
+function parseAvalonFanValues(blob) {
+    const text = String(blob || '');
+    if (!text) return [];
+    const values = [];
+    const re = /Fan\d+\[(\d+(?:\.\d+)?)\]/gi;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+        const num = parseFloat(match[1]);
+        if (Number.isFinite(num) && num >= 0 && num <= 30000) {
+            values.push(num);
+        }
+    }
+    return values;
+}
+
+function parseAvalonHashBoardCount(blob) {
+    const text = String(blob || '');
+    if (!text) return null;
+    const match = text.match(/Hash\s*Board\s*:\s*(\d+)/i);
+    if (!match) return null;
+    const value = parseInt(match[1], 10);
+    if (!Number.isFinite(value) || value < 0) return null;
+    return value;
 }
 
 function deriveTempC(statsRecords) {
@@ -1524,6 +1624,12 @@ function deriveTempC(statsRecords) {
         if (Number.isFinite(num) && num >= -20 && num <= 200) {
             return num.toFixed(1);
         }
+    }
+
+    const avalonBlob = getAvalonStatsBlob(statsRecords);
+    const avalonAvgTemp = parseAvalonBracketNumber(avalonBlob, 'TAvg');
+    if (avalonAvgTemp !== null && avalonAvgTemp >= -20 && avalonAvgTemp <= 200) {
+        return avalonAvgTemp.toFixed(1);
     }
 
     const fromStats = [];
@@ -1541,7 +1647,8 @@ function deriveFanSummary(statsRecords) {
     for (const statsRecord of statsRecords) {
         fromStats.push(...listNumbersByHints(statsRecord, ['fan'], { min: 200, max: 30000 }));
     }
-    const fans = [...fromStats];
+    const avalonFans = parseAvalonFanValues(getAvalonStatsBlob(statsRecords));
+    const fans = [...fromStats, ...avalonFans];
     if (!fans.length) return 'N/A';
     return fans.map(v => Math.round(v)).join('/');
 }
@@ -1572,7 +1679,10 @@ function deriveFanStatus(statsRecords) {
     };
 
     const fanSlots = collectFrom(statsRecords);
-    const allSlots = Array.from(fanSlots.values());
+    let allSlots = Array.from(fanSlots.values());
+    if (!allSlots.length) {
+        allSlots = parseAvalonFanValues(getAvalonStatsBlob(statsRecords));
+    }
     if (!allSlots.length) return 'N/A';
 
     const total = allSlots.length;
@@ -1603,6 +1713,12 @@ function deriveFrequencyMHz(statsRecords) {
         fromStats.push(...listNumbersByHints(statsRecord, ['freq', 'frequency'], { min: 10, max: 20000 }));
     }
     const values = [...fromStats];
+    if (!values.length) {
+        const avalonFreq = parseAvalonBracketNumber(getAvalonStatsBlob(statsRecords), 'Freq');
+        if (avalonFreq !== null && avalonFreq >= 10 && avalonFreq <= 20000) {
+            return formatMaybeNumber(avalonFreq, 0);
+        }
+    }
     if (!values.length) return 'N/A';
     const avg = values.reduce((sum, n) => sum + n, 0) / values.length;
     return formatMaybeNumber(avg, 0);
@@ -1677,16 +1793,19 @@ function deriveHashboards(statsRecords, devsPayload) {
         'chainnum',
         'chain num',
         'miner_count',
+        'mm count',
+        'mmcount',
         'chain count'
     ]);
     const activeStat = pickFieldFromRecords(statsRecords, ['activehashboard', 'active hashboards', 'chainacn', 'chain acn']);
     const activeFromDevsStatus = deriveActiveHashboardsFromDevsStatus(devsPayload);
     const chainDerived = deriveChainBoardCountsFromStats(statsRecords);
+    const avalonHashBoards = parseAvalonHashBoardCount(getAvalonStatsBlob(statsRecords));
 
     const total = parseInt(totalStat, 10);
     const active = parseInt(activeStat, 10);
 
-    if (!Number.isFinite(total) && !Number.isFinite(active) && activeFromDevsStatus === null && chainDerived.active === null) {
+    if (!Number.isFinite(total) && !Number.isFinite(active) && activeFromDevsStatus === null && chainDerived.active === null && avalonHashBoards === null) {
         return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
 
@@ -1694,11 +1813,11 @@ function deriveHashboards(statsRecords, devsPayload) {
         ? active
         : (activeFromDevsStatus !== null
             ? activeFromDevsStatus
-            : (chainDerived.active !== null ? chainDerived.active : null));
+            : (chainDerived.active !== null ? chainDerived.active : (avalonHashBoards !== null ? avalonHashBoards : null)));
 
     const resolvedTotal = Number.isFinite(total) && total >= 0
         ? total
-        : (chainDerived.total !== null ? chainDerived.total : null);
+        : (chainDerived.total !== null ? chainDerived.total : (avalonHashBoards !== null ? avalonHashBoards : null));
 
     if (resolvedActive !== null && resolvedTotal === null) {
         return { hashboards: 'N/A', activeHashboards: String(resolvedActive) };
@@ -1727,13 +1846,17 @@ function deriveProfile(ip, payloads) {
     const combinedControlBoardRecords = [
         ...configRecords,
         ...statsRecords,
+        ...versionRecords,
         ...devdetailsRecords
     ];
 
-    // Strict-source mapping: Miner Type is only sourced from STATS.Type.
-    // If STATS does not provide it, return N/A.
+    // Prefer STATS.Type, but fall back to VERSION.PROD/MODEL for firmware
+    // families (e.g. Avalon) that do not expose Type in STATS.
     const statsRecordsForType = sectionArray(payloads.stats, ['stats']);
-    const minerType = pickFieldFromRecords(statsRecordsForType, ['type']) || 'N/A';
+    const minerType =
+        pickFieldFromRecords(statsRecordsForType, ['type']) ||
+        pickFieldFromRecords(versionRecords, ['prod', 'model']) ||
+        'N/A';
 
     const controlBoard = normalizeControlBoard(combinedControlBoardRecords);
 

@@ -1,6 +1,6 @@
 {
   "name": "miner-locator",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Miner-Finder with Electron packaging for Linux and Windows portable builds",
   "main": "electron-main.js",

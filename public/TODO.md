@@ -1,4 +1,4 @@
-<!-- Version: 0.2.2 -->
+<!-- Version: 0.3.0 -->
 # Miner-Finder - Roadmap
 
 ## GitHub Upload Tracker
@@ -94,6 +94,10 @@
 - [x] Tune regression policy to hard-fail contract/provenance checks and report other column fill issues as warnings to avoid firmware-specific false positives
 - [x] Column hotfix pass (priority order): derive hashboards from chain stats (`miner_count` + `chain_rate*`/`chain_acn*`), add fast ARP MAC fallback during base scan, and broaden control-board/PSU/voltage extraction fallbacks when `config/devdetails` are unsupported
 - [x] Dual-port miner support: 4028-path now fires 6060 `/board_type` + `/productName` in parallel at no added latency; 6060-path fires 4028 CGMiner commands in parallel and uses richer data (temp/fans/pools/chains) when available — covers mixed-firmware fleets (e.g. S21 XP + S21 Pro)
+- [x] Fix pool URL parsing for LUXminer nested `pools` payload shape (avoid boolean `stratum active` fallback and extract real `stratum+tcp://...` URLs)
+- [x] Normalize pool endpoint values that arrive as bare `host:port` by canonicalizing to `stratum+tcp://host:port`
+- [x] Add Avalon-aware column fallbacks: derive miner type from `VERSION.PROD/MODEL`, derive fans/frequency/temp/hashboards from `STATS.MM ID0` blob, and support MHS-based hashrate conversion to TH/s
+- [x] Normalize displayed pool values to plain `host:port` and classify Avalon firmware as `Avalon Stock` when VERSION metadata identifies Avalon models
 - [x] Add temporary discovery toggle (`ENABLE_DISCOVERY_PASS`) with default on (set `ENABLE_DISCOVERY_PASS=0` for probe-only testing)
 - [x] Remove re-check path (recovery/completeness sweeps) so scans use probe + discovery only
 - [x] Improve joined-command handling with partial per-command retry when some joined sections fail
