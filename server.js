@@ -12,28 +12,28 @@ const PORT = parseInt(process.env.PORT || '3067', 10) || 3067;
 const MAX_IPS_PER_SCAN = 65536;
 const API_PORT_CGMINER = 4028;
 const API_PORT_ANTMINER_6060 = 6060;
-const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.SCAN_CONCURRENCY || '256', 10) || 256);
+const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.SCAN_CONCURRENCY || '192', 10) || 192);
 const HTTP_FALLBACK_CONCURRENCY = Math.max(1, parseInt(process.env.HTTP_FALLBACK_CONCURRENCY || '6', 10) || 6);
 const PER_HOST_COMMAND_CONCURRENCY = Math.max(1, parseInt(process.env.PER_HOST_COMMAND_CONCURRENCY || '2', 10) || 2);
 const MINER_API_TIMEOUT_MS = Math.max(200, parseInt(process.env.MINER_API_TIMEOUT_MS || '1200', 10) || 1200);
-const PROBE_TIMEOUT_MS = Math.max(100, parseInt(process.env.PROBE_TIMEOUT_MS || '300', 10) || 300);
-const DISCOVERY_API_TIMEOUT_MS = Math.max(150, parseInt(process.env.DISCOVERY_API_TIMEOUT_MS || '450', 10) || 450);
+const PROBE_TIMEOUT_MS = Math.max(100, parseInt(process.env.PROBE_TIMEOUT_MS || '900', 10) || 900);
+const DISCOVERY_API_TIMEOUT_MS = Math.max(150, parseInt(process.env.DISCOVERY_API_TIMEOUT_MS || '1800', 10) || 1800);
 const ENRICHMENT_API_TIMEOUT_MS = Math.max(200, parseInt(process.env.ENRICHMENT_API_TIMEOUT_MS || String(MINER_API_TIMEOUT_MS), 10) || MINER_API_TIMEOUT_MS);
-const RECOVERY_PROBE_TIMEOUT_MS = Math.max(PROBE_TIMEOUT_MS, parseInt(process.env.RECOVERY_PROBE_TIMEOUT_MS || '900', 10) || 900);
-const RECOVERY_DISCOVERY_TIMEOUT_MS = Math.max(DISCOVERY_API_TIMEOUT_MS, parseInt(process.env.RECOVERY_DISCOVERY_TIMEOUT_MS || '900', 10) || 900);
 const MIN_SCAN_CONCURRENCY = 1;
 const MAX_SCAN_CONCURRENCY = 2000;
-const PROBE_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.PROBE_PASS_CONCURRENCY || '1200', 10) || 1200);
-const BASE_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.BASE_PASS_CONCURRENCY || '512', 10) || 512);
+const PROBE_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.PROBE_PASS_CONCURRENCY || '512', 10) || 512);
+const BASE_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.BASE_PASS_CONCURRENCY || '128', 10) || 128);
+const EARLY_DISCOVERY_CONCURRENCY = Math.max(1, parseInt(process.env.EARLY_DISCOVERY_CONCURRENCY || '24', 10) || 24);
+const EARLY_DISCOVERY_MAX_HOSTS = Math.max(0, parseInt(process.env.EARLY_DISCOVERY_MAX_HOSTS || '64', 10) || 64);
 const ENRICHMENT_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.ENRICHMENT_PASS_CONCURRENCY || '96', 10) || 96);
-const RECOVERY_PASS_CONCURRENCY = Math.max(1, parseInt(process.env.RECOVERY_PASS_CONCURRENCY || '192', 10) || 192);
 const ARP_CACHE_TTL_MS = Math.max(200, parseInt(process.env.ARP_CACHE_TTL_MS || '1500', 10) || 1500);
 const AUTO_OPEN_BROWSER = !['0', 'false', 'no', 'off'].includes(String(process.env.AUTO_OPEN_BROWSER || '1').trim().toLowerCase());
 const ENABLE_ENRICHMENT_FALLBACK = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_ENRICHMENT_FALLBACK || '0').trim().toLowerCase());
 const ENABLE_ENRICHMENT_PASS = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_ENRICHMENT_PASS || '0').trim().toLowerCase());
+const ENABLE_DISCOVERY_PASS = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_DISCOVERY_PASS || '1').trim().toLowerCase());
 const CAPABILITY_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.CAPABILITY_CACHE_TTL_MS || '600000', 10) || 600000);
 const PROTOCOL_CACHE_TTL_MS = Math.max(1000, parseInt(process.env.PROTOCOL_CACHE_TTL_MS || '300000', 10) || 300000);
-const ICMP_SWEEP_MODE = String(process.env.ICMP_SWEEP_MODE || 'prioritize').trim().toLowerCase(); // off | prioritize | strict
+const ICMP_SWEEP_MODE = String(process.env.ICMP_SWEEP_MODE || 'off').trim().toLowerCase(); // off | prioritize | strict
 const ICMP_PING_TIMEOUT_MS = Math.max(100, parseInt(process.env.ICMP_PING_TIMEOUT_MS || '250', 10) || 250);
 const ICMP_PING_CONCURRENCY = Math.max(1, parseInt(process.env.ICMP_PING_CONCURRENCY || '2048', 10) || 2048);
 
@@ -46,11 +46,24 @@ const enrichmentCheckQueue = [];
 let arpCacheByIp = null;
 let arpCacheUpdatedAt = 0;
 let lastScanSnapshot = null;
+let lastCapabilityCachePurgeAt = 0;
+let lastProtocolCachePurgeAt = 0;
+let scanActive = false;
 const commandCapabilityCacheByIp = new Map();
 const apiProtocolCacheByIp = new Map();
 
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'self'"
+    );
+    next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 function ipToInt(ip) {
     const parts = String(ip).trim().split('.');
@@ -217,32 +230,6 @@ function parsePositiveLimit(input, fallback = 200) {
     return parsed;
 }
 
-function checkMiner(ip) {
-    return new Promise((resolve) => {
-        const client = new net.Socket();
-        let data = '';
-        client.setTimeout(1500);
-
-        client.connect(4028, ip, () => {
-            client.write(JSON.stringify({ command: 'summary' }));
-        });
-
-        client.on('data', (chunk) => { data += chunk.toString(); });
-
-        client.on('end', () => {
-            try {
-                const cleanData = data.replace(/\0/g, ''); 
-                resolve({ ip, status: 'online', data: JSON.parse(cleanData) });
-            } catch (e) {
-                resolve({ ip, status: 'error', error: 'Invalid JSON' });
-            }
-        });
-
-        client.on('timeout', () => { client.destroy(); resolve({ ip, status: 'offline' }); });
-        client.on('error', () => { resolve({ ip, status: 'offline' }); });
-    });
-}
-
 function requestMinerCommand(ip, command, timeoutMs = MINER_API_TIMEOUT_MS) {
     return new Promise((resolve) => {
         const client = new net.Socket();
@@ -343,6 +330,8 @@ async function requestMinerCommands(ip, commands, options = {}) {
 }
 
 function purgeExpiredCapabilityCache(now = Date.now()) {
+    if (now - lastCapabilityCachePurgeAt < 1000) return;
+    lastCapabilityCachePurgeAt = now;
     for (const [ip, entry] of commandCapabilityCacheByIp.entries()) {
         if (!entry || !entry.checkedAt || (now - entry.checkedAt) > CAPABILITY_CACHE_TTL_MS) {
             commandCapabilityCacheByIp.delete(ip);
@@ -459,6 +448,8 @@ function probeTcpPort(ip, port, timeoutMs) {
 }
 
 function purgeExpiredProtocolCache(now = Date.now()) {
+    if (now - lastProtocolCachePurgeAt < 1000) return;
+    lastProtocolCachePurgeAt = now;
     for (const [ip, entry] of apiProtocolCacheByIp.entries()) {
         if (!entry || !entry.checkedAt || (now - entry.checkedAt) > PROTOCOL_CACHE_TTL_MS) {
             apiProtocolCacheByIp.delete(ip);
@@ -696,6 +687,8 @@ function buildProfileFrom6060Payload(ip, payloads, baseProfile = null) {
             version: baseProfile?.data?.version || null
         }
     };
+
+    profile.columnProvenance = build6060ColumnProvenance(profile.data, profile);
 
     return profile;
 }
@@ -1141,6 +1134,286 @@ function isMissing(value) {
     return !text || text === 'n/a' || text === 'na' || text === 'unknown';
 }
 
+function hasCommandPayload(payload) {
+    if (payload === undefined || payload === null) return false;
+    if (Array.isArray(payload)) return payload.length > 0;
+    if (typeof payload === 'object') return Object.keys(payload).length > 0;
+    return String(payload).trim().length > 0;
+}
+
+function hasSourceCommandData(payloads, commandName) {
+    if (!payloads || typeof payloads !== 'object') return false;
+
+    const key = String(commandName || '').trim();
+    if (!key) return false;
+
+    if (hasCommandPayload(payloads[key])) return true;
+
+    if (key.startsWith('/')) {
+        const normalized = key.slice(1).trim();
+        if (normalized && hasCommandPayload(payloads[normalized])) return true;
+    }
+
+    return false;
+}
+
+function makeColumnSource(source, commands) {
+    return {
+        source: String(source || 'unknown'),
+        commands: Array.isArray(commands) ? commands : []
+    };
+}
+
+function build4028ColumnProvenance(payloads, profile) {
+    const hasSummary = hasCommandPayload(payloads.summary);
+    const hasStats = hasCommandPayload(payloads.stats);
+    const hasPools = hasCommandPayload(payloads.pools);
+    const hasVersion = hasCommandPayload(payloads.version);
+    const hasDevs = hasCommandPayload(payloads.devs);
+    const hasConfig = hasCommandPayload(payloads.config);
+    const hasDevdetails = hasCommandPayload(payloads.devdetails);
+
+    return {
+        ip: makeColumnSource('scan-target', []),
+        status: makeColumnSource('scan-state', []),
+        hostname: makeColumnSource(!isMissing(profile.hostname) && hasStats ? 'stats' : 'missing', ['stats']),
+        mac: makeColumnSource(!isMissing(profile.mac) && hasConfig ? 'config' : 'missing', ['config']),
+        ipMode: makeColumnSource(!isMissing(profile.ipMode) && hasConfig ? 'config' : 'missing', ['config']),
+        os: makeColumnSource(!isMissing(profile.os) && hasVersion ? 'version' : 'missing', ['version']),
+        osVersion: makeColumnSource(!isMissing(profile.osVersion) && hasVersion ? 'version' : 'missing', ['version']),
+        minerType: makeColumnSource(!isMissing(profile.minerType) && hasStats ? 'stats' : 'missing', ['stats']),
+        cbType: makeColumnSource(!isMissing(profile.cbType) && hasConfig ? 'config' : 'missing', ['config']),
+        psuInfo: makeColumnSource(!isMissing(profile.psuInfo) && hasConfig ? 'config' : 'missing', ['config']),
+        temp: makeColumnSource(!isMissing(profile.temp) && hasStats ? 'stats' : 'missing', ['stats']),
+        fans: makeColumnSource(!isMissing(profile.fans) && hasStats ? 'stats' : 'missing', ['stats']),
+        fanStatus: makeColumnSource(!isMissing(profile.fanStatus) && hasStats ? 'stats' : 'missing', ['stats']),
+        voltage: makeColumnSource(!isMissing(profile.voltage) && hasDevdetails ? 'devdetails' : 'missing', ['devdetails']),
+        frequencyMHz: makeColumnSource(!isMissing(profile.frequencyMHz) && hasStats ? 'stats' : 'missing', ['stats']),
+        hashrate: makeColumnSource(!isMissing(profile.hashrate) && hasSummary ? 'summary' : 'missing', ['summary']),
+        activeHashboards: makeColumnSource(!isMissing(profile.activeHashboards) && (hasStats || hasDevs) ? 'stats/devs' : 'missing', ['stats', 'devs']),
+        hashboards: makeColumnSource(!isMissing(profile.hashboards) && (hasStats || hasDevs) ? 'stats/devs' : 'missing', ['stats', 'devs']),
+        pools: makeColumnSource(!isMissing(profile.pools) && hasPools ? 'pools' : 'missing', ['pools'])
+    };
+}
+
+function build6060ColumnProvenance(payloads, profile) {
+    const hasRate = hasCommandPayload(payloads.rate) || hasCommandPayload(payloads.ideal_rate) || hasCommandPayload(payloads.max_rate);
+    const hasBoardType = hasCommandPayload(payloads.board_type);
+    const hasProductName = hasCommandPayload(payloads.productName);
+    const hasReadvol = hasCommandPayload(payloads.readvol);
+    const hasSummary = hasCommandPayload(payloads.summary);
+    const hasStats = hasCommandPayload(payloads.stats);
+    const hasPools = hasCommandPayload(payloads.pools);
+    const hasVersion = hasCommandPayload(payloads.version);
+
+    return {
+        ip: makeColumnSource('scan-target', []),
+        status: makeColumnSource('scan-state', []),
+        hostname: makeColumnSource(!isMissing(profile.hostname) && hasStats ? 'stats' : 'missing', ['stats']),
+        mac: makeColumnSource('missing', ['config']),
+        ipMode: makeColumnSource('missing', ['config']),
+        os: makeColumnSource(!isMissing(profile.os) && hasVersion ? 'version' : 'missing', ['version']),
+        osVersion: makeColumnSource(!isMissing(profile.osVersion) && hasVersion ? 'version' : 'missing', ['version']),
+        minerType: makeColumnSource(!isMissing(profile.minerType) && hasProductName ? '6060.productName' : 'missing', ['/productName']),
+        cbType: makeColumnSource(!isMissing(profile.cbType) && hasBoardType ? '6060.board_type' : 'missing', ['/board_type']),
+        psuInfo: makeColumnSource('missing', ['config']),
+        temp: makeColumnSource(!isMissing(profile.temp) && hasStats ? 'stats' : 'missing', ['stats']),
+        fans: makeColumnSource(!isMissing(profile.fans) && hasStats ? 'stats' : 'missing', ['stats']),
+        fanStatus: makeColumnSource(!isMissing(profile.fanStatus) && hasStats ? 'stats' : 'missing', ['stats']),
+        voltage: makeColumnSource(!isMissing(profile.voltage) && hasReadvol ? '6060.readvol' : 'missing', ['/readvol']),
+        frequencyMHz: makeColumnSource(!isMissing(profile.frequencyMHz) && hasStats ? 'stats' : 'missing', ['stats']),
+        hashrate: makeColumnSource(!isMissing(profile.hashrate) && hasRate ? '6060.rate' : 'missing', ['/rate', '/ideal_rate', '/max_rate']),
+        activeHashboards: makeColumnSource(!isMissing(profile.activeHashboards) && hasBoardType ? '6060.board_type' : 'missing', ['/board_type']),
+        hashboards: makeColumnSource(!isMissing(profile.hashboards) && hasBoardType ? '6060.board_type' : 'missing', ['/board_type']),
+        pools: makeColumnSource(!isMissing(profile.pools) && hasPools ? 'pools' : 'missing', ['pools'])
+    };
+}
+
+const COLUMN_VALIDATION_SPECS = [
+    { id: 'ip', required: true },
+    { id: 'status', required: true },
+    { id: 'mac', required: false },
+    { id: 'ipMode', required: false },
+    { id: 'os', required: false },
+    { id: 'osVersion', required: false },
+    { id: 'minerType', required: true },
+    { id: 'cbType', required: false },
+    { id: 'psuInfo', required: false },
+    { id: 'temp', required: true },
+    { id: 'fans', required: false },
+    { id: 'fanStatus', required: false },
+    { id: 'voltage', required: false },
+    { id: 'frequencyMHz', required: false },
+    { id: 'hashrate', required: true },
+    { id: 'activeHashboards', required: false },
+    { id: 'hashboards', required: true },
+    { id: 'pools', required: true }
+];
+
+function validateColumnValue(columnId, value) {
+    if (columnId === 'status') {
+        return String(value || '').toLowerCase() === 'online'
+            ? { valid: true }
+            : { valid: false, reason: 'Expected online status.' };
+    }
+
+    if (isMissing(value)) {
+        return { valid: false, reason: 'Value is missing.' };
+    }
+
+    const raw = String(value || '').trim();
+
+    if (columnId === 'ip') {
+        return Number.isNaN(ipToInt(raw))
+            ? { valid: false, reason: 'Invalid IPv4 format.' }
+            : { valid: true };
+    }
+
+    if (columnId === 'mac') {
+        return /([0-9a-f]{2}[:-]){5}[0-9a-f]{2}/i.test(raw)
+            ? { valid: true }
+            : { valid: false, reason: 'Invalid MAC format.' };
+    }
+
+    if (columnId === 'ipMode') {
+        const normalized = raw.toLowerCase();
+        return normalized === 'dhcp' || normalized === 'static'
+            ? { valid: true }
+            : { valid: false, reason: 'Expected DHCP or Static.' };
+    }
+
+    if (columnId === 'fanStatus') {
+        const match = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
+        if (!match) return { valid: false, reason: 'Expected fan status in running/total format.' };
+        const running = parseInt(match[1], 10);
+        const total = parseInt(match[2], 10);
+        if (!Number.isFinite(running) || !Number.isFinite(total) || running > total) {
+            return { valid: false, reason: 'Invalid running/total fan values.' };
+        }
+        return { valid: true };
+    }
+
+    if (columnId === 'hashboards') {
+        const match = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
+        if (!match) return { valid: false, reason: 'Expected hashboards in active/total format.' };
+        const active = parseInt(match[1], 10);
+        const total = parseInt(match[2], 10);
+        if (!Number.isFinite(active) || !Number.isFinite(total) || active > total) {
+            return { valid: false, reason: 'Invalid active/total hashboard values.' };
+        }
+        return { valid: true };
+    }
+
+    if (columnId === 'activeHashboards') {
+        const num = parseInt(raw, 10);
+        return Number.isFinite(num) && num >= 0
+            ? { valid: true }
+            : { valid: false, reason: 'Expected non-negative integer.' };
+    }
+
+    if (columnId === 'temp') {
+        const num = parseFloat(raw);
+        return Number.isFinite(num) && num >= -20 && num <= 200
+            ? { valid: true }
+            : { valid: false, reason: 'Temperature outside expected range (-20 to 200 C).' };
+    }
+
+    if (columnId === 'voltage') {
+        const num = parseFloat(raw);
+        return Number.isFinite(num) && num >= 0 && num <= 2000
+            ? { valid: true }
+            : { valid: false, reason: 'Voltage outside expected range (0 to 2000).' };
+    }
+
+    if (columnId === 'frequencyMHz') {
+        const num = parseFloat(raw);
+        return Number.isFinite(num) && num >= 10 && num <= 20000
+            ? { valid: true }
+            : { valid: false, reason: 'Frequency outside expected range (10 to 20000 MHz).' };
+    }
+
+    if (columnId === 'hashrate') {
+        const num = parseFloat(raw);
+        return Number.isFinite(num) && num >= 0
+            ? { valid: true }
+            : { valid: false, reason: 'Hashrate is not a valid number.' };
+    }
+
+    return { valid: true };
+}
+
+function buildMinerColumnValidation(miner) {
+    const provenance = miner && typeof miner === 'object' ? (miner.columnProvenance || {}) : {};
+    const payloads = miner && miner.data && typeof miner.data === 'object' ? miner.data : {};
+
+    const columns = {};
+    let okCount = 0;
+    let missingCount = 0;
+    let invalidCount = 0;
+
+    for (const spec of COLUMN_VALIDATION_SPECS) {
+        const value = miner ? miner[spec.id] : null;
+        const sourceInfo = provenance[spec.id] || makeColumnSource('unknown', []);
+        const sourceCommands = Array.isArray(sourceInfo.commands) ? sourceInfo.commands : [];
+        const sourceCommandPresent = sourceCommands.length === 0
+            ? true
+            : sourceCommands.some((command) => hasSourceCommandData(payloads, command));
+
+        const validity = validateColumnValue(spec.id, value);
+        let status = 'ok';
+        if (!validity.valid) status = isMissing(value) ? 'missing' : 'invalid';
+
+        if (status === 'ok') okCount += 1;
+        else if (status === 'missing') missingCount += 1;
+        else invalidCount += 1;
+
+        columns[spec.id] = {
+            value,
+            status,
+            required: Boolean(spec.required),
+            source: sourceInfo.source,
+            sourceCommands,
+            sourceCommandPresent,
+            reason: validity.valid ? null : validity.reason
+        };
+    }
+
+    return {
+        ip: miner && miner.ip ? String(miner.ip) : 'N/A',
+        apiProtocol: miner && miner.apiProtocol ? String(miner.apiProtocol) : 'unknown',
+        summary: {
+            okCount,
+            missingCount,
+            invalidCount
+        },
+        columns
+    };
+}
+
+function summarizeColumnValidationReports(reports) {
+    const columnSummary = {};
+
+    for (const spec of COLUMN_VALIDATION_SPECS) {
+        columnSummary[spec.id] = {
+            required: Boolean(spec.required),
+            ok: 0,
+            missing: 0,
+            invalid: 0
+        };
+    }
+
+    for (const report of reports) {
+        for (const spec of COLUMN_VALIDATION_SPECS) {
+            const status = report.columns?.[spec.id]?.status || 'missing';
+            if (status === 'ok') columnSummary[spec.id].ok += 1;
+            else if (status === 'invalid') columnSummary[spec.id].invalid += 1;
+            else columnSummary[spec.id].missing += 1;
+        }
+    }
+
+    return columnSummary;
+}
+
 function normalizeIpMode(value) {
     if (value === undefined || value === null) return 'N/A';
     const text = String(value).trim().toLowerCase();
@@ -1430,7 +1703,7 @@ function deriveProfile(ip, payloads) {
     ]);
     const ipMode = normalizeIpMode(ipModeRaw);
 
-    return {
+    const profile = {
         ip,
         status: 'online',
         hostname: String(hostname || 'N/A'),
@@ -1467,6 +1740,10 @@ function deriveProfile(ip, payloads) {
             SUMMARY: sectionArray(payloads.summary, ['summary'])
         }
     };
+
+    profile.columnProvenance = build4028ColumnProvenance(payloads, profile);
+
+    return profile;
 }
 
 async function enrichMissingFields(profile) {
@@ -1765,21 +2042,26 @@ app.get('/api/scan', async (req, res) => {
         return res.status(400).json({ error: parsed.error });
     }
 
+    if (scanActive) {
+        return res.status(409).json({ error: 'A scan is already in progress.' });
+    }
+    scanActive = true;
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
     console.log(`Starting real-time scan for ${parsed.total} IP(s): ${range}`);
-    
+    res.write(`event: scan-start\ndata: ${JSON.stringify({ total: parsed.total, range: String(range || '') })}\n\n`);
+
+    try {
     let foundCount = 0;
     let enrichedCount = 0;
-    let recoveryFoundCount = 0;
     let aborted = false;
     let scanCompleted = false;
     const targets = [];
     let probeTargets = [];
     const responsiveTargets = [];
-    const nonResponsiveTargets = [];
     const protocolByIp = new Map();
     const protocolDetailByIp = new Map();
     const baseOnlineResults = [];
@@ -1846,8 +2128,6 @@ app.get('/api/scan', async (req, res) => {
         responsiveTargetCount: 0,
         protocol4028Count: 0,
         protocol6060Count: 0,
-        recoveryTargetCount: 0,
-        recoveryFoundCount: 0,
         scanConcurrency,
         probePassConcurrency: PROBE_PASS_CONCURRENCY,
         basePassConcurrency: BASE_PASS_CONCURRENCY,
@@ -1965,8 +2245,72 @@ app.get('/api/scan', async (req, res) => {
 
     const probePassConcurrency = Math.max(1, Math.min(scanConcurrency, PROBE_PASS_CONCURRENCY, MAX_SCAN_CONCURRENCY));
     const basePassConcurrency = Math.max(1, Math.min(scanConcurrency, BASE_PASS_CONCURRENCY, MAX_SCAN_CONCURRENCY));
+    const earlyDiscoveryConcurrency = Math.max(1, Math.min(basePassConcurrency, EARLY_DISCOVERY_CONCURRENCY));
+    const earlyDiscoveryMaxHosts = Math.max(0, EARLY_DISCOVERY_MAX_HOSTS);
     const enrichmentPassConcurrency = Math.max(1, Math.min(scanConcurrency, ENRICHMENT_PASS_CONCURRENCY));
-    const recoveryPassConcurrency = Math.max(1, Math.min(scanConcurrency, RECOVERY_PASS_CONCURRENCY, MAX_SCAN_CONCURRENCY));
+    const earlyDiscoveryQueue = [];
+    const earlyDiscoveryQueuedIps = new Set();
+    let earlyDiscoveryStartedCount = 0;
+    let activeEarlyDiscoveryChecks = 0;
+
+    function canQueueEarlyDiscovery() {
+        return ENABLE_DISCOVERY_PASS && earlyDiscoveryMaxHosts > 0 && (earlyDiscoveryStartedCount + earlyDiscoveryQueue.length) < earlyDiscoveryMaxHosts;
+    }
+
+    function recordOnlineDiscoveryResult(result) {
+        if (!result || result.status !== 'online' || foundIps.has(result.ip)) return;
+
+        const decoratedResult = attachProtocolDetail(result);
+        foundIps.add(result.ip);
+        foundCount += 1;
+        baseOnlineResults.push(decoratedResult);
+        if (lastScanSnapshot) {
+            lastScanSnapshot.foundCount = foundCount;
+            // Preserve full miner payload for post-scan debugging.
+            lastScanSnapshot.results.push(decoratedResult);
+        }
+        res.write(`data: ${JSON.stringify(decoratedResult)}\n\n`);
+    }
+
+    function drainEarlyDiscoveryQueue() {
+        if (aborted || !ENABLE_DISCOVERY_PASS || earlyDiscoveryMaxHosts <= 0) return;
+
+        while (activeEarlyDiscoveryChecks < earlyDiscoveryConcurrency && earlyDiscoveryQueue.length > 0) {
+            const ipStr = earlyDiscoveryQueue.shift();
+            activeEarlyDiscoveryChecks += 1;
+            earlyDiscoveryStartedCount += 1;
+
+            (async () => {
+                try {
+                    const protocol = protocolByIp.get(ipStr) || '4028';
+                    const result = await runBaseCheckTask(() => checkMinerBase(ipStr, DISCOVERY_API_TIMEOUT_MS, protocol));
+                    if (aborted) return;
+                    recordOnlineDiscoveryResult(result);
+                } catch (_err) {
+                    // Ignore per-host early-discovery errors; full discovery pass still runs.
+                } finally {
+                    activeEarlyDiscoveryChecks -= 1;
+                    if (!aborted) drainEarlyDiscoveryQueue();
+                }
+            })();
+        }
+    }
+
+    function queueEarlyDiscovery(ipStr) {
+        if (!canQueueEarlyDiscovery()) return;
+        if (earlyDiscoveryQueuedIps.has(ipStr)) return;
+        if (foundIps.has(ipStr)) return;
+
+        earlyDiscoveryQueuedIps.add(ipStr);
+        earlyDiscoveryQueue.push(ipStr);
+        drainEarlyDiscoveryQueue();
+    }
+
+    async function waitForEarlyDiscoveryToSettle() {
+        while (!aborted && activeEarlyDiscoveryChecks > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+    }
 
     res.write(`event: scan-progress\ndata: ${JSON.stringify({
         phase: 'probe',
@@ -1979,6 +2323,8 @@ app.get('/api/scan', async (req, res) => {
         icmpRespondedCount,
         icmpSkippedCount,
         icmpUnavailableCount,
+        earlyDiscoveryConcurrency,
+        earlyDiscoveryMaxHosts,
         probePassConcurrency,
         basePassConcurrency,
         enrichmentPassConcurrency
@@ -1995,8 +2341,7 @@ app.get('/api/scan', async (req, res) => {
             protocolByIp.set(ipStr, protocol);
             if (protocol === '4028') protocol4028Count += 1;
             else if (protocol === '6060') protocol6060Count += 1;
-        } else {
-            nonResponsiveTargets.push(ipStr);
+            queueEarlyDiscovery(ipStr);
         }
     });
 
@@ -2004,10 +2349,23 @@ app.get('/api/scan', async (req, res) => {
         lastScanSnapshot.responsiveTargetCount = responsiveTargets.length;
         lastScanSnapshot.protocol4028Count = protocol4028Count;
         lastScanSnapshot.protocol6060Count = protocol6060Count;
-        lastScanSnapshot.recoveryTargetCount = nonResponsiveTargets.length;
     }
 
     if (aborted) return;
+
+    if (!ENABLE_DISCOVERY_PASS) {
+        res.write(`event: discovery-done\ndata: ${JSON.stringify({
+            targetCount: targets.length,
+            probeTargetCount: probeTargets.length,
+            responsiveTargetCount: responsiveTargets.length,
+            foundCount,
+            enrichmentEnabled: false,
+            enrichmentTargetCount: 0,
+            discoveryEnabled: false
+        })}\n\n`);
+    } else {
+
+    await waitForEarlyDiscoveryToSettle();
 
     res.write(`event: scan-progress\ndata: ${JSON.stringify({
         phase: 'discovery',
@@ -2024,88 +2382,15 @@ app.get('/api/scan', async (req, res) => {
 
     await runWithConcurrency(responsiveTargets, basePassConcurrency, async (ipStr) => {
         if (aborted) return;
+        if (foundIps.has(ipStr)) return;
 
         const protocol = protocolByIp.get(ipStr) || '4028';
         const result = await runBaseCheckTask(() => checkMinerBase(ipStr, DISCOVERY_API_TIMEOUT_MS, protocol));
         if (aborted) return;
-        if (result && result.status === 'online') {
-            const isNew = !foundIps.has(result.ip);
-            if (isNew) {
-                const decoratedResult = attachProtocolDetail(result);
-                foundIps.add(result.ip);
-                foundCount++;
-                baseOnlineResults.push(decoratedResult);
-                if (lastScanSnapshot) {
-                    lastScanSnapshot.foundCount = foundCount;
-                    // Preserve full miner payload for post-scan debugging.
-                    lastScanSnapshot.results.push(decoratedResult);
-                }
-                res.write(`data: ${JSON.stringify(decoratedResult)}\n\n`);
-            }
-        }
+        recordOnlineDiscoveryResult(result);
     });
 
-    if (!aborted && nonResponsiveTargets.length > 0) {
-        res.write(`event: scan-progress\ndata: ${JSON.stringify({
-            phase: 'recovery',
-            targetCount: nonResponsiveTargets.length,
-            responsiveTargetCount: responsiveTargets.length,
-            foundCount,
-            recoveryFoundCount,
-            enrichedCount: 0,
-            probePassConcurrency,
-            basePassConcurrency,
-            recoveryPassConcurrency,
-            protocol4028Count,
-            protocol6060Count,
-            enrichmentPassConcurrency
-        })}\n\n`);
-
-        await runWithConcurrency(nonResponsiveTargets, recoveryPassConcurrency, async (ipStr) => {
-            if (aborted) return;
-
-            const probeDetail = await probeApiProtocolDetailed(ipStr, RECOVERY_PROBE_TIMEOUT_MS);
-            protocolDetailByIp.set(ipStr, probeDetail);
-            trackProtocolDetail(probeDetail);
-            const protocol = probeDetail.protocol;
-            if (!protocol) return;
-            protocolByIp.set(ipStr, protocol);
-            if (protocol === '4028') protocol4028Count += 1;
-            else if (protocol === '6060') protocol6060Count += 1;
-
-            const result = await runBaseCheckTask(() => checkMinerBase(ipStr, RECOVERY_DISCOVERY_TIMEOUT_MS, protocol));
-            if (aborted || !result || result.status !== 'online') return;
-
-            if (foundIps.has(result.ip)) return;
-
-            const decoratedResult = attachProtocolDetail(result);
-            foundIps.add(result.ip);
-            foundCount += 1;
-            recoveryFoundCount += 1;
-            baseOnlineResults.push(decoratedResult);
-            if (lastScanSnapshot) {
-                lastScanSnapshot.foundCount = foundCount;
-                lastScanSnapshot.recoveryFoundCount = recoveryFoundCount;
-                lastScanSnapshot.results.push(decoratedResult);
-            }
-
-            res.write(`data: ${JSON.stringify(decoratedResult)}\n\n`);
-            res.write(`event: scan-progress\ndata: ${JSON.stringify({
-                phase: 'recovery',
-                targetCount: nonResponsiveTargets.length,
-                responsiveTargetCount: responsiveTargets.length,
-                foundCount,
-                recoveryFoundCount,
-                enrichedCount: 0,
-                probePassConcurrency,
-                basePassConcurrency,
-                recoveryPassConcurrency,
-                protocol4028Count,
-                protocol6060Count,
-                enrichmentPassConcurrency
-            })}\n\n`);
-        });
-    }
+    // Re-check passes were removed by request: no recovery/completeness sweep.
 
     if (!aborted) {
         res.write(`event: discovery-done\ndata: ${JSON.stringify({
@@ -2113,7 +2398,6 @@ app.get('/api/scan', async (req, res) => {
             probeTargetCount: probeTargets.length,
             responsiveTargetCount: responsiveTargets.length,
             foundCount,
-            recoveryFoundCount,
             enrichmentEnabled: ENABLE_ENRICHMENT_PASS,
             enrichmentTargetCount: ENABLE_ENRICHMENT_PASS ? baseOnlineResults.length : 0
         })}\n\n`);
@@ -2125,12 +2409,10 @@ app.get('/api/scan', async (req, res) => {
             targetCount: responsiveTargets.length,
             responsiveTargetCount: responsiveTargets.length,
             foundCount,
-            recoveryFoundCount,
             enrichedCount: 0,
             enrichmentTargetCount: baseOnlineResults.length,
             probePassConcurrency,
             basePassConcurrency,
-            recoveryPassConcurrency,
             protocol4028Count,
             protocol6060Count,
             enrichmentPassConcurrency
@@ -2163,18 +2445,17 @@ app.get('/api/scan', async (req, res) => {
                 targetCount: responsiveTargets.length,
                 responsiveTargetCount: responsiveTargets.length,
                 foundCount,
-                recoveryFoundCount,
                 enrichedCount,
                 enrichmentTargetCount: baseOnlineResults.length,
                 lastEnrichedIp: decoratedEnriched.ip,
                 probePassConcurrency,
                 basePassConcurrency,
-                recoveryPassConcurrency,
                 protocol4028Count,
                 protocol6060Count,
                 enrichmentPassConcurrency
             })}\n\n`);
         });
+    }
     }
 
     console.log(`Scan complete. Found ${foundCount} miners.`);
@@ -2193,7 +2474,6 @@ app.get('/api/scan', async (req, res) => {
 
     if (lastScanSnapshot) {
         lastScanSnapshot.foundCount = foundCount;
-        lastScanSnapshot.recoveryFoundCount = recoveryFoundCount;
         lastScanSnapshot.enrichedCount = enrichedCount;
         lastScanSnapshot.protocol4028Count = protocol4028Count;
         lastScanSnapshot.protocol6060Count = protocol6060Count;
@@ -2220,7 +2500,6 @@ app.get('/api/scan', async (req, res) => {
         probeTargetCount: probeTargets.length,
         responsiveTargetCount: responsiveTargets.length,
         foundCount,
-        recoveryFoundCount,
         enrichedCount,
         enrichmentEnabled: ENABLE_ENRICHMENT_PASS,
         icmpSweepMode,
@@ -2240,6 +2519,9 @@ app.get('/api/scan', async (req, res) => {
         probeFailureRate: Number(probeFailureRate.toFixed(4))
     })}\n\n`);
     res.end();
+    } finally {
+        scanActive = false;
+    }
 });
 
 // Returns the full payloads captured during the most recent scan for debugging.
@@ -2253,6 +2535,9 @@ app.get('/api/scan/last', (req, res) => {
 
     const ip = String(req.query.ip || '').trim();
     if (ip) {
+        if (Number.isNaN(ipToInt(ip))) {
+            return res.status(400).json({ error: 'Invalid IP address.' });
+        }
         const match = lastScanSnapshot.results.find(item => String(item.ip || '') === ip);
         if (!match) {
             return res.status(404).json({
@@ -2278,7 +2563,6 @@ app.get('/api/scan/last', (req, res) => {
                 protocol4028Count: lastScanSnapshot.protocol4028Count || 0,
                 protocol6060Count: lastScanSnapshot.protocol6060Count || 0,
                 foundCount: lastScanSnapshot.foundCount,
-                recoveryFoundCount: lastScanSnapshot.recoveryFoundCount || 0,
                 enrichedCount: lastScanSnapshot.enrichedCount || 0,
                 protocolCacheHits: lastScanSnapshot.protocolCacheHits || 0,
                 protocolCacheMisses: lastScanSnapshot.protocolCacheMisses || 0,
@@ -2316,7 +2600,6 @@ app.get('/api/scan/last', (req, res) => {
             protocol4028Count: lastScanSnapshot.protocol4028Count || 0,
             protocol6060Count: lastScanSnapshot.protocol6060Count || 0,
             foundCount: lastScanSnapshot.foundCount,
-            recoveryFoundCount: lastScanSnapshot.recoveryFoundCount || 0,
             enrichedCount: lastScanSnapshot.enrichedCount || 0,
             protocolCacheHits: lastScanSnapshot.protocolCacheHits || 0,
             protocolCacheMisses: lastScanSnapshot.protocolCacheMisses || 0,
@@ -2332,6 +2615,52 @@ app.get('/api/scan/last', (req, res) => {
             totalResults: lastScanSnapshot.results.length
         },
         results
+    });
+});
+
+// Returns per-column validation/provenance report from the latest scan snapshot.
+// Query params:
+//   ip=<address>   validate only one miner
+//   limit=<n>      validate at most n results (default 200)
+app.get('/api/scan/last/columns/validate', (req, res) => {
+    if (!lastScanSnapshot) {
+        return res.status(404).json({ error: 'No scan snapshot is available yet.' });
+    }
+
+    const ip = String(req.query.ip || '').trim();
+    const limit = parsePositiveLimit(req.query.limit, 200);
+    let miners = lastScanSnapshot.results || [];
+
+    if (ip) {
+        if (Number.isNaN(ipToInt(ip))) {
+            return res.status(400).json({ error: 'Invalid IP address.' });
+        }
+
+        const match = miners.find((item) => String(item.ip || '') === ip);
+        if (!match) {
+            return res.status(404).json({
+                error: `No miner found for IP ${ip} in the latest scan snapshot.`
+            });
+        }
+        miners = [match];
+    } else {
+        miners = miners.slice(0, limit);
+    }
+
+    const reports = miners.map(buildMinerColumnValidation);
+
+    return res.json({
+        meta: {
+            startedAt: lastScanSnapshot.startedAt,
+            finishedAt: lastScanSnapshot.finishedAt,
+            aborted: lastScanSnapshot.aborted,
+            range: lastScanSnapshot.range,
+            foundCount: lastScanSnapshot.foundCount,
+            totalResults: lastScanSnapshot.results.length,
+            validatedResults: reports.length
+        },
+        summary: summarizeColumnValidationReports(reports),
+        reports
     });
 });
 

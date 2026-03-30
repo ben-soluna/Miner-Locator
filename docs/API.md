@@ -1,7 +1,7 @@
 <!-- Version: 0.2.2 -->
 # API Documentation
 
-Last updated: 2026-03-17 (session 2)
+Last updated: 2026-03-30
 
 ## Overview
 
@@ -109,6 +109,50 @@ Completion event:
 - Miner-Finder uses bounded worker concurrency (default `48`, env `SCAN_CONCURRENCY`) to avoid large burst traffic on switches.
 - Targets ending in `.0` and `.255` are skipped.
 - If the client disconnects, server marks scan as aborted and stops writing SSE events.
+
+### Column Provenance Metadata
+
+Each miner result now includes a `columnProvenance` object that explains where each table column came from.
+
+Example:
+
+```json
+"columnProvenance": {
+  "hashrate": { "source": "summary", "commands": ["summary"] },
+  "voltage": { "source": "devdetails", "commands": ["devdetails"] },
+  "cbType": { "source": "config", "commands": ["config"] }
+}
+```
+
+This is used by backend validation and can also help troubleshoot missing values.
+
+## Endpoint: `GET /api/scan/last`
+
+Returns the most recent scan snapshot (including raw payloads and all mapped columns).
+
+### Query Parameters
+
+- `ip` (optional): return one miner by IP.
+- `limit` (optional): maximum number of results to return (default `200`).
+
+## Endpoint: `GET /api/scan/last/columns/validate`
+
+Builds a per-column validation report from the latest scan snapshot.
+
+### Query Parameters
+
+- `ip` (optional): validate one miner by IP.
+- `limit` (optional): maximum number of miners to validate (default `200`).
+
+### Response Shape
+
+- `meta`: scan metadata and validation scope.
+- `summary`: per-column aggregate counts (`ok`, `missing`, `invalid`).
+- `reports`: one report per miner, including:
+  - per-column `status` (`ok`, `missing`, `invalid`)
+  - `source` and `sourceCommands`
+  - whether source command payload was present (`sourceCommandPresent`)
+  - validation `reason` when invalid/missing
 
 ### Field Coverage Notes
 

@@ -71,6 +71,26 @@
 - [x] Switch default discovery payload to lightweight summary+stats and move deep fields to enrichment
 - [x] Emit discovery-complete event before enrichment finishes so progress is visible sooner
 - [x] Add second-chance recovery sweep for probe misses to improve miner coverage
+- [x] Add direct command fallback in recovery (`4028` then `6060`) when re-probe still reports no open protocol, improving detection of miners with flaky probe behavior
+- [x] Increase recovery default probe/discovery timeouts to 1200 ms (`RECOVERY_PROBE_TIMEOUT_MS`, `RECOVERY_DISCOVERY_TIMEOUT_MS`) to improve completeness on slower devices/networks
+- [x] Add periodic recovery progress updates (`processedCount`) so long recheck phases do not appear hung
+- [x] Bound direct recovery fallback timeout with `RECOVERY_DIRECT_FALLBACK_TIMEOUT_MS` (default 250 ms) to reduce long-tail recheck stalls
+- [x] Add hard cap for direct recovery fallback attempts (`RECOVERY_DIRECT_FALLBACK_MAX_ATTEMPTS`, default 256) to prevent long recheck tails on large ranges
+- [x] Reduce recovery default timeouts for speed (`RECOVERY_PROBE_TIMEOUT_MS`, `RECOVERY_DISCOVERY_TIMEOUT_MS` = 900 ms; direct fallback timeout = 250 ms)
+- [x] Remove "Phase" terminology from user-facing scan status text (Probe / Discovery / Recovery / Enrichment labels)
+- [x] Change `RECOVERY_DIRECT_FALLBACK_MAX_ATTEMPTS` default to `0` (unlimited) to avoid skipping large portions of non-responsive hosts
+- [x] Add final completeness sweep pass over unresolved hosts (`ENABLE_COMPLETENESS_PASS`, `COMPLETENESS_PASS_CONCURRENCY`, `COMPLETENESS_DISCOVERY_TIMEOUT_MS`) to recover additional miners missed in fast passes
+- [x] Tune completeness defaults for higher catch rate on larger ranges (`COMPLETENESS_PASS_CONCURRENCY` 96, `COMPLETENESS_DISCOVERY_TIMEOUT_MS` 1500 ms)
+- [x] Tune one-pass defaults for reliability and throughput: probe concurrency 1200, probe timeout 450 ms, discovery timeout 700 ms, base discovery concurrency 384
+- [x] Retune one-pass defaults for higher completeness on large ranges: probe concurrency 800, probe timeout 700 ms, discovery timeout 1100 ms, base discovery concurrency 224
+- [x] Precision retune after measured run (289 found, ~3 s first result, ~11 s complete): discovery timeout 1400 ms and base discovery concurrency 192 to improve late/slow miner detection
+- [x] Validate locked one-pass profile on 10.31.1.1-10.31.8.255: 320/322 found, ~8 s first result, ~12 s completion (Discovery 1400 ms, Base concurrency 192)
+- [x] Promote completeness-first defaults (every-miner priority): scan concurrency 192, probe timeout 900 ms, discovery timeout 1800 ms, probe concurrency 512, base discovery concurrency 128
+- [x] Add bounded early-discovery streaming during probe (`EARLY_DISCOVERY_CONCURRENCY` 24, `EARLY_DISCOVERY_MAX_HOSTS` 64) so table rows can appear before full probe completes
+- [x] Add backend column provenance metadata (`columnProvenance`) to scan results for all core table fields (source + source command list)
+- [x] Add backend column validator endpoint `/api/scan/last/columns/validate` with per-miner per-column status (`ok`/`missing`/`invalid`) and aggregate summary counts
+- [x] Add temporary discovery toggle (`ENABLE_DISCOVERY_PASS`) with default on (set `ENABLE_DISCOVERY_PASS=0` for probe-only testing)
+- [x] Remove re-check path (recovery/completeness sweeps) so scans use probe + discovery only
 - [x] Improve joined-command handling with partial per-command retry when some joined sections fail
 - [x] Add `check|cmd` capability cache and supported-command planner for enrichment requests
 - [x] Add protocol-aware scan fallback with 6060 read-only adapter (probe/discovery/recovery/enrichment)
@@ -80,6 +100,7 @@
 - [x] Add scan snapshot probe diagnostics (cache hit/miss, timeout/error rates, protocol hit rate)
 - [x] Add optional parallel ICMP pre-pass modes (`off`/`prioritize`/`strict`) for enterprise scan acceleration
 - [x] Set default ICMP pre-pass mode to `prioritize` for faster first results
+- [x] Change default ICMP pre-pass mode to `off` to minimize click-to-first-result delay; keep `prioritize`/`strict` available via `ICMP_SWEEP_MODE` env override
 - [x] Disable enrichment pass by default and fold key fields into single-pass discovery
 - [x] Add Electron packaging targets for Linux AppImage and Windows portable `.exe` (USB-direct run)
 - [x] Fix Linux Electron startup path to avoid blank window by bootstrapping server in-process and showing startup error UI
@@ -160,7 +181,7 @@
 - [x] Create a second backup copy at `/home/ben/Scanner-backups/Scanner-backup-2026-03-25_06-52-07.tar.gz`.
 - [x] Recovery sweep: searched backups + reflog + unreachable objects for missing work, then restored recoverable missing files (`docs/`, `scripts/`, and `public/js/Scanner.code-workspace`) from `miner-finder-backup-20260320-0927.tar.gz`.
 
-## Security and Optimization Findings (2026-03-18)
+## Security and Optimization Findings (2026-03-18, updated 2026-03-30)
 - [ ] Add optional auth/token guard for `/api/scan` and `/api/debug/:ip` if this app is ever exposed beyond localhost.
 - [x] Keep `/api/debug/:ip` available in normal local runtime.
 - [ ] Add optional lightweight per-IP request rate limit middleware for scan/debug endpoints.
@@ -169,6 +190,12 @@
 - [x] Batch frontend scan table renders and cache writes to reduce UI/storage churn.
 - [x] Escape miner table cell output and IP links to reduce XSS risk from malformed device data.
 - [ ] Add automated regression tests for scan stream parsing and frontend table rendering safety.
+- [x] Add HTTP security headers middleware (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, CSP) — 2026-03-30.
+- [x] Throttle `purgeExpiredProtocolCache` and `purgeExpiredCapabilityCache` to at most once/sec to prevent O(n²) Map iteration during large scans — 2026-03-30.
+- [x] Remove dead `checkMiner` function (superseded by `requestMinerCommand`; had hardcoded 1500 ms timeout) — 2026-03-30.
+- [x] Add IP format validation for `/api/scan/last?ip=` query parameter — 2026-03-30.
+- [x] Set explicit `limit: '100kb'` on `express.json()` middleware — 2026-03-30.
+- [x] Add concurrent scan guard (`scanActive` flag + 409 response + `try/finally` cleanup) to prevent shared-concurrency-counter corruption and `lastScanSnapshot` clobbering from simultaneous scan requests — 2026-03-30.
 
 ## Column Data-Link Review (One By One)
 - Rule: use only the explicitly assigned miner API call(s) per column; if absent, keep `N/A` (no cross-call or HTTP/ARP/DNS fallback fill-ins).
