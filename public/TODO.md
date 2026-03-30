@@ -89,6 +89,11 @@
 - [x] Add bounded early-discovery streaming during probe (`EARLY_DISCOVERY_CONCURRENCY` 24, `EARLY_DISCOVERY_MAX_HOSTS` 64) so table rows can appear before full probe completes
 - [x] Add backend column provenance metadata (`columnProvenance`) to scan results for all core table fields (source + source command list)
 - [x] Add backend column validator endpoint `/api/scan/last/columns/validate` with per-miner per-column status (`ok`/`missing`/`invalid`) and aggregate summary counts
+- [x] Add regression snapshot capture script (`npm run capture:snapshot`) to save `/api/scan/last` payloads under `regression/column-snapshots/`
+- [x] Add column regression check script (`npm run test:column-regression`) to validate required fields + `columnProvenance` across saved snapshots
+- [x] Tune regression policy to hard-fail contract/provenance checks and report other column fill issues as warnings to avoid firmware-specific false positives
+- [x] Column hotfix pass (priority order): derive hashboards from chain stats (`miner_count` + `chain_rate*`/`chain_acn*`), add fast ARP MAC fallback during base scan, and broaden control-board/PSU/voltage extraction fallbacks when `config/devdetails` are unsupported
+- [x] Dual-port miner support: 4028-path now fires 6060 `/board_type` + `/productName` in parallel at no added latency; 6060-path fires 4028 CGMiner commands in parallel and uses richer data (temp/fans/pools/chains) when available — covers mixed-firmware fleets (e.g. S21 XP + S21 Pro)
 - [x] Add temporary discovery toggle (`ENABLE_DISCOVERY_PASS`) with default on (set `ENABLE_DISCOVERY_PASS=0` for probe-only testing)
 - [x] Remove re-check path (recovery/completeness sweeps) so scans use probe + discovery only
 - [x] Improve joined-command handling with partial per-command retry when some joined sections fail

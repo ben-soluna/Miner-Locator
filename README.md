@@ -38,6 +38,8 @@ Open: `http://localhost:3067`
 - `npm run build:electron:win` — Builds Windows Electron artifacts in `dist/electron/`.
 - `npm run test:api` — API validation checks.
 - `npm run test:ui-smoke` — UI clickthrough test with Selenium.
+- `npm run capture:snapshot` — Save latest `/api/scan/last` payload to `regression/column-snapshots/`.
+- `npm run test:column-regression` — Validate saved scan snapshots for column-fill regressions.
 - `npm run build:exe` — Build OS-native executable to `dist/`.
 - `npm run bundle:portable:win` — Create Windows portable bundle with launcher.
 - `npm run bundle:node:win` — Create signed Node.js Windows package (SmartScreen-friendly).

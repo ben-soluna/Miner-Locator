@@ -1173,21 +1173,34 @@ function build4028ColumnProvenance(payloads, profile) {
     const hasConfig = hasCommandPayload(payloads.config);
     const hasDevdetails = hasCommandPayload(payloads.devdetails);
 
+    const macSource = !isMissing(profile.mac)
+        ? (hasConfig ? 'config' : 'arp')
+        : 'missing';
+    const cbTypeSource = !isMissing(profile.cbType)
+        ? (hasConfig ? 'config' : (hasStats ? 'stats' : 'unknown'))
+        : 'missing';
+    const psuSource = !isMissing(profile.psuInfo)
+        ? (hasConfig ? 'config' : (hasStats ? 'stats' : (hasDevdetails ? 'devdetails' : 'unknown')))
+        : 'missing';
+    const voltageSource = !isMissing(profile.voltage)
+        ? (hasDevdetails ? 'devdetails' : (hasStats ? 'stats' : 'unknown'))
+        : 'missing';
+
     return {
         ip: makeColumnSource('scan-target', []),
         status: makeColumnSource('scan-state', []),
         hostname: makeColumnSource(!isMissing(profile.hostname) && hasStats ? 'stats' : 'missing', ['stats']),
-        mac: makeColumnSource(!isMissing(profile.mac) && hasConfig ? 'config' : 'missing', ['config']),
+        mac: makeColumnSource(macSource, macSource === 'arp' ? [] : ['config']),
         ipMode: makeColumnSource(!isMissing(profile.ipMode) && hasConfig ? 'config' : 'missing', ['config']),
         os: makeColumnSource(!isMissing(profile.os) && hasVersion ? 'version' : 'missing', ['version']),
         osVersion: makeColumnSource(!isMissing(profile.osVersion) && hasVersion ? 'version' : 'missing', ['version']),
         minerType: makeColumnSource(!isMissing(profile.minerType) && hasStats ? 'stats' : 'missing', ['stats']),
-        cbType: makeColumnSource(!isMissing(profile.cbType) && hasConfig ? 'config' : 'missing', ['config']),
-        psuInfo: makeColumnSource(!isMissing(profile.psuInfo) && hasConfig ? 'config' : 'missing', ['config']),
+        cbType: makeColumnSource(cbTypeSource, ['config', 'stats']),
+        psuInfo: makeColumnSource(psuSource, ['config', 'stats', 'devdetails']),
         temp: makeColumnSource(!isMissing(profile.temp) && hasStats ? 'stats' : 'missing', ['stats']),
         fans: makeColumnSource(!isMissing(profile.fans) && hasStats ? 'stats' : 'missing', ['stats']),
         fanStatus: makeColumnSource(!isMissing(profile.fanStatus) && hasStats ? 'stats' : 'missing', ['stats']),
-        voltage: makeColumnSource(!isMissing(profile.voltage) && hasDevdetails ? 'devdetails' : 'missing', ['devdetails']),
+        voltage: makeColumnSource(voltageSource, ['devdetails', 'stats']),
         frequencyMHz: makeColumnSource(!isMissing(profile.frequencyMHz) && hasStats ? 'stats' : 'missing', ['stats']),
         hashrate: makeColumnSource(!isMissing(profile.hashrate) && hasSummary ? 'summary' : 'missing', ['summary']),
         activeHashboards: makeColumnSource(!isMissing(profile.activeHashboards) && (hasStats || hasDevs) ? 'stats/devs' : 'missing', ['stats', 'devs']),
@@ -1569,16 +1582,16 @@ function deriveFanStatus(statsRecords) {
     return `${running}/${total}`;
 }
 
-function deriveVoltage(statsRecords) {
-    const fromStats = [];
-    for (const statsRecord of statsRecords) {
-        fromStats.push(...listNumbersByHints(statsRecord, ['volt', 'voltage'], {
+function deriveVoltage(records) {
+    const fromRecords = [];
+    for (const record of records) {
+        fromRecords.push(...listNumbersByHints(record, ['volt', 'voltage'], {
             min: 0,
             max: 2000,
             exclude: ['volatile']
         }));
     }
-    const values = [...fromStats];
+    const values = [...fromRecords];
     if (!values.length) return 'N/A';
     const avg = values.reduce((sum, n) => sum + n, 0) / values.length;
     return formatMaybeNumber(avg, 2);
@@ -1618,21 +1631,74 @@ function deriveActiveHashboardsFromDevsStatus(devsPayload) {
     return null;
 }
 
+function deriveChainBoardCountsFromStats(statsRecords) {
+    const chainIndexState = new Map();
+
+    for (const record of statsRecords) {
+        if (!record || typeof record !== 'object') continue;
+
+        for (const [key, value] of Object.entries(record)) {
+            const normalized = normKey(key);
+            const rateMatch = normalized.match(/^chainrate(\d+)$/);
+            const acnMatch = normalized.match(/^chainacn(\d+)$/);
+            if (!rateMatch && !acnMatch) continue;
+
+            const index = parseInt((rateMatch || acnMatch)[1], 10);
+            if (!Number.isFinite(index) || index <= 0) continue;
+
+            const raw = String(value === undefined || value === null ? '' : value).trim();
+            const num = parseFloat(raw);
+            const state = chainIndexState.get(index) || { seen: false, active: false };
+            if (raw !== '') state.seen = true;
+            if (Number.isFinite(num) && num > 0) state.active = true;
+            chainIndexState.set(index, state);
+        }
+    }
+
+    if (!chainIndexState.size) return { active: null, total: null };
+
+    let total = 0;
+    let active = 0;
+    for (const state of chainIndexState.values()) {
+        if (state.seen || state.active) total += 1;
+        if (state.active) active += 1;
+    }
+
+    return {
+        active: total > 0 ? active : null,
+        total: total > 0 ? total : null
+    };
+}
+
 function deriveHashboards(statsRecords, devsPayload) {
-    const totalStat = pickFieldFromRecords(statsRecords, ['hashboard', 'hashboards', 'chainnum', 'chain num']);
+    const totalStat = pickFieldFromRecords(statsRecords, [
+        'hashboard',
+        'hashboards',
+        'chainnum',
+        'chain num',
+        'miner_count',
+        'chain count'
+    ]);
     const activeStat = pickFieldFromRecords(statsRecords, ['activehashboard', 'active hashboards', 'chainacn', 'chain acn']);
     const activeFromDevsStatus = deriveActiveHashboardsFromDevsStatus(devsPayload);
+    const chainDerived = deriveChainBoardCountsFromStats(statsRecords);
+
     const total = parseInt(totalStat, 10);
     const active = parseInt(activeStat, 10);
 
-    if (!Number.isFinite(total) && !Number.isFinite(active) && activeFromDevsStatus === null) {
+    if (!Number.isFinite(total) && !Number.isFinite(active) && activeFromDevsStatus === null && chainDerived.active === null) {
         return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
 
     const resolvedActive = Number.isFinite(active) && active >= 0
         ? active
-        : (activeFromDevsStatus !== null ? activeFromDevsStatus : null);
-    const resolvedTotal = Number.isFinite(total) && total >= 0 ? total : null;
+        : (activeFromDevsStatus !== null
+            ? activeFromDevsStatus
+            : (chainDerived.active !== null ? chainDerived.active : null));
+
+    const resolvedTotal = Number.isFinite(total) && total >= 0
+        ? total
+        : (chainDerived.total !== null ? chainDerived.total : null);
 
     if (resolvedActive !== null && resolvedTotal === null) {
         return { hashboards: 'N/A', activeHashboards: String(resolvedActive) };
@@ -1642,9 +1708,11 @@ function deriveHashboards(statsRecords, devsPayload) {
         return { hashboards: 'N/A', activeHashboards: 'N/A' };
     }
 
+    const boundedActive = Math.max(0, Math.min(resolvedActive, resolvedTotal));
+
     return {
-        hashboards: `${resolvedActive}/${resolvedTotal}`,
-        activeHashboards: String(resolvedActive)
+        hashboards: `${boundedActive}/${resolvedTotal}`,
+        activeHashboards: String(boundedActive)
     };
 }
 
@@ -1654,15 +1722,20 @@ function deriveProfile(ip, payloads) {
     const versionRecords = sectionArray(payloads.version, ['version']);
     const devs = sectionArray(payloads.devs, ['devs']);
     const configRecords = sectionArray(payloads.config, ['config']);
-
     const devdetailsRecords = sectionArray(payloads.devdetails, ['devdetails']);
+
+    const combinedControlBoardRecords = [
+        ...configRecords,
+        ...statsRecords,
+        ...devdetailsRecords
+    ];
 
     // Strict-source mapping: Miner Type is only sourced from STATS.Type.
     // If STATS does not provide it, return N/A.
     const statsRecordsForType = sectionArray(payloads.stats, ['stats']);
     const minerType = pickFieldFromRecords(statsRecordsForType, ['type']) || 'N/A';
 
-    const controlBoard = normalizeControlBoard(configRecords);
+    const controlBoard = normalizeControlBoard(combinedControlBoardRecords);
 
     const osType = normalizeFirmware(versionRecords);
 
@@ -1678,13 +1751,16 @@ function deriveProfile(ip, payloads) {
     const temperatureC = deriveTempC(statsRecords);
     const fans = deriveFanSummary(statsRecords);
     const fanStatus = deriveFanStatus(statsRecords);
-    const voltage = deriveVoltage(devdetailsRecords);
+    const voltage = deriveVoltage([...devdetailsRecords, ...statsRecords]);
     const frequencyMHz = deriveFrequencyMHz(statsRecords);
     const pools = derivePoolString(payloads.pools);
     const hashboardData = deriveHashboards(statsRecords, payloads.devs);
 
     const psuInfo =
-        pickFieldFromRecords(configRecords, ['psulabel', 'psu label', 'psu_label', 'psuid', 'psumodel', 'psu model']) ||
+        pickFieldFromRecords(
+            [...configRecords, ...statsRecords, ...devdetailsRecords],
+            ['psulabel', 'psu label', 'psu_label', 'psuid', 'psumodel', 'psu model', 'power model', 'power_type', 'psu_type']
+        ) ||
         'N/A';
 
     const ipModeRaw = pickFieldFromRecords(configRecords, [
@@ -1862,18 +1938,70 @@ async function checkMinerDetailed(ip) {
     return enrichMissingFields(base);
 }
 
+async function applyFastBaseFallbacks(profile) {
+    if (!profile || profile.status !== 'online' || !profile.ip) return profile;
+
+    const patched = { ...profile };
+    if (isMissing(patched.mac)) {
+        const mac = await readMacFromSystem(patched.ip);
+        if (!isMissing(mac)) patched.mac = String(mac).toUpperCase();
+    }
+
+    return patched;
+}
+
 async function checkMinerBase(ip, timeoutMs = DISCOVERY_API_TIMEOUT_MS, protocol = '4028') {
     if (protocol === '6060') {
-        return checkMinerBaseVia6060(ip, timeoutMs);
+        // Many miners that open port 6060 also respond to the 4028 CGMiner API
+        // with much richer data (temp, fans, pools, chains). Query both in parallel
+        // and use whichever source provides better coverage.
+        const [via6060, cgminerPayloads] = await Promise.all([
+            checkMinerBaseVia6060(ip, timeoutMs),
+            requestMinerCommands(ip, ['summary', 'stats', 'pools', 'version'], { timeoutMs })
+        ]);
+
+        if (cgminerPayloads.summary) {
+            // Build a full profile from the richer 4028 data
+            const profile4028 = deriveProfile(ip, {
+                summary: cgminerPayloads.summary,
+                stats: cgminerPayloads.stats || null,
+                pools: cgminerPayloads.pools || null,
+                devs: null,
+                devdetails: null,
+                edevs: null,
+                config: null,
+                version: cgminerPayloads.version || null
+            });
+            profile4028.apiProtocol = '6060';
+
+            // Prefer 6060 product name and board type when they're more specific
+            if (!isMissing(via6060?.minerType) && via6060.minerType !== 'N/A') {
+                profile4028.minerType = via6060.minerType;
+            }
+            if (!isMissing(via6060?.cbType) && via6060.cbType !== 'N/A') {
+                profile4028.cbType = via6060.cbType;
+                profile4028.controlBoard = via6060.controlBoard || via6060.cbType;
+            }
+
+            return applyFastBaseFallbacks(profile4028);
+        }
+
+        return applyFastBaseFallbacks(via6060);
     }
 
     const baseCommands = ENABLE_ENRICHMENT_PASS
         ? ['summary', 'stats']
         : ['summary', 'stats', 'pools', 'version', 'devs', 'config', 'devdetails'];
 
-    const basePayloads = await requestMinerCommands(ip, baseCommands, {
-        timeoutMs
-    });
+    // Also probe 6060 /board_type in parallel — some miners (e.g. Antminer S21 Pro)
+    // answer on both ports but only expose board/PSU metadata via the 6060 HTTP API.
+    // For 4028-only machines this fails fast (connection refused).
+    const [basePayloads, boardType6060, productName6060] = await Promise.all([
+        requestMinerCommands(ip, baseCommands, { timeoutMs }),
+        request6060Command(ip, '/board_type', timeoutMs),
+        request6060Command(ip, '/productName', timeoutMs)
+    ]);
+
     const summary = basePayloads.summary;
     if (!summary) return { ip, status: 'offline' };
 
@@ -1890,7 +2018,17 @@ async function checkMinerBase(ip, timeoutMs = DISCOVERY_API_TIMEOUT_MS, protocol
 
     profile.apiProtocol = '4028';
 
-    return profile;
+    // Apply 6060 fallbacks for fields that 4028 firmware can't provide
+    if (isMissing(profile.cbType)) {
+        const bt = asTrimmedString(boardType6060);
+        if (bt) { profile.cbType = bt; profile.controlBoard = bt; }
+    }
+    if (isMissing(profile.minerType)) {
+        const pn = asTrimmedString(productName6060);
+        if (pn) profile.minerType = pn;
+    }
+
+    return applyFastBaseFallbacks(profile);
 }
 
 function needsEnrichmentPass(profile) {

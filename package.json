@@ -6,6 +6,8 @@
   "main": "electron-main.js",
   "scripts": {
     "start": "node server.js",
+    "capture:snapshot": "node scripts/capture-scan-snapshot.js",
+    "test:column-regression": "node scripts/run-column-regression.js",
     "electron:dev": "electron .",
     "build:electron": "electron-builder",
     "build:electron:linux": "electron-builder --linux AppImage",

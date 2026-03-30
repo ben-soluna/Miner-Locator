@@ -1,7 +1,7 @@
 <!-- Version: 0.2.2 -->
 # Operations Runbook
 
-Last updated: 2026-03-17 (session 2)
+Last updated: 2026-03-30
 
 ## Routine Commands
 
@@ -33,6 +33,18 @@ Build Windows SmartScreen-friendly bundle (zip with official `node.exe`):
 
 ```bash
 npm run bundle:node:win
+```
+
+Capture latest scan snapshot for regression fixtures:
+
+```bash
+npm run capture:snapshot
+```
+
+Run column regression checks against saved snapshots:
+
+```bash
+npm run test:column-regression
 ```
 
 ## Release / Checkpoint Flow
@@ -161,6 +173,34 @@ Basic syntax checks:
 ```bash
 node --check server.js
 node --check scripts/minify-client.js
+node --check scripts/capture-scan-snapshot.js
+node --check scripts/run-column-regression.js
+```
+
+## Column Regression Workflow
+
+1. Run a representative network scan from the UI.
+2. Capture the latest `/api/scan/last` payload:
+
+```bash
+npm run capture:snapshot
+```
+
+3. Run regression checks on all fixtures in `regression/column-snapshots/`:
+
+```bash
+npm run test:column-regression
+```
+
+Regression policy:
+
+- Hard-fail checks: contract columns (`ip`, `status`) and provenance structure.
+- Warning-only checks: all remaining data columns (quality visibility without failing builds on firmware/protocol differences).
+
+4. Optional: test one fixture file only:
+
+```bash
+node scripts/run-column-regression.js regression/column-snapshots/scan-last-YYYYMMDD-HHMMSS.json
 ```
 
 Expected outcomes:
